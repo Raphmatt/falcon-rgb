@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use eframe::egui;
 use falcon_core::protocol::{MAX_MACRO_EVENTS, PROFILE_COUNT};
-use falcon_core::{KeyAssignment, Lighting, Macro, MacroEvent, Profile};
+use falcon_core::{KeyAssignment, Macro, MacroEvent, Profile};
 use web_time::Instant;
 
 use super::{APPLY_DEBOUNCE, FalconApp, Recording, initial_device_snapshot};
@@ -162,16 +162,34 @@ impl FalconApp {
         }
     }
 
-    /// The keypad's stored lighting for layer `p` replaces the configured one (the keypad is
-    /// what the user sees). Values the model cannot hold (unknown effect bytes) are ignored.
-    pub(super) fn adopt_keypad_lighting(&mut self, p: usize, lighting: Lighting) {
-        if p >= PROFILE_COUNT || lighting.validate().is_err() {
+    /// Layer `p` as stored on the keypad replaces the configured one: lighting and every key
+    /// whose device byte differs ([`falcon_core::LayerBackup::apply_to_profile`]); keys that
+    /// already match keep their richer config value. Macro keys whose macro the app does not
+    /// know stay as configured and are marked as differing (orange dot), since Save would
+    /// replace them.
+    pub(super) fn adopt_keypad_block(&mut self, p: usize, block: &falcon_core::protocol::Block) {
+        if p >= PROFILE_COUNT {
             return;
         }
-        if self.config.profiles[p].lighting != lighting {
-            self.config.profiles[p].lighting = lighting.clone();
+        let layer = falcon_core::LayerBackup {
+            layer: p + 1,
+            block: *block,
+            macros: Vec::new(),
+        };
+        let unknown = layer.apply_to_profile(&mut self.config.profiles[p]);
+        self.device_snapshot[p] = self.config.profiles[p].clone();
+        for &key in &unknown {
+            // Not the configured value: the layer shows as differing from the keypad.
+            self.device_snapshot[p].keys[key - 1] = KeyAssignment::Macro(Macro::default());
         }
-        self.device_snapshot[p].lighting = lighting;
+        if !unknown.is_empty() {
+            let keys: Vec<String> = unknown.iter().map(ToString::to_string).collect();
+            self.info(format!(
+                "Layer {}: key {} plays a macro on the keypad that cannot be read back; Save replaces it with what the app shows",
+                p + 1,
+                keys.join(", ")
+            ));
+        }
     }
 
     pub(super) fn mark_written(&mut self, p: usize, profile: Profile) {

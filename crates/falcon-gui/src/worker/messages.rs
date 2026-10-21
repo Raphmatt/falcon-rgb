@@ -1,5 +1,6 @@
 //! Messages between the UI and the worker thread.
 
+use falcon_core::protocol::Block;
 use falcon_core::{
     Backup, Config, FirmwareVersion, InputReport, LayerBackup, Lighting, PacketRecord, Profile,
 };
@@ -102,8 +103,9 @@ pub enum Update {
     BackupReady(Box<Backup>),
     /// One layer of a [`Command::Restore`] reached the keypad.
     Restored(Box<LayerBackup>),
-    /// Lighting of a layer as stored on the real keypad (`0x82` at connect and refresh).
-    KeypadLighting(usize, Box<Lighting>),
+    /// A layer's block as stored on the real keypad (`0x82` at connect and refresh): the app
+    /// adopts its lighting and key map.
+    KeypadBlock(usize, Box<Block>),
     Done {
         job: Job,
         result: Result<(), String>,

@@ -17,7 +17,6 @@ use falcon_core::protocol::PROFILE_COUNT;
 use falcon_core::transport::hid::{self, HidTransport};
 use falcon_core::{
     Backup, DeviceEvent, Error, Falcon, FirmwareVersion, Profile, Recorder, ReportLen, Transport,
-    encode,
 };
 
 use super::{Command, Connection, Job, Mode, SharedSim, SimAction, Update};
@@ -213,25 +212,23 @@ impl Worker {
         // Unknown until the next refresh if 0x81 fails; the connection itself is fine.
         let _ = self.read_active_profile();
         if !simulated {
-            self.read_lighting();
+            self.read_layers();
         }
         self.flush_log();
     }
 
-    /// Reads every layer's lighting from the keypad (`0x82` ×5), so the app shows what the
-    /// keypad really displays rather than what the config file last said. Key assignments stay
-    /// as configured: macros cannot be read back.
-    fn read_lighting(&mut self) {
+    /// Reads every layer's block from the keypad (`0x82` ×5), so the app shows what the keypad
+    /// really holds (lighting and key map) rather than what the config file last said.
+    fn read_layers(&mut self) {
         for p in 0..PROFILE_COUNT {
             let Some(dev) = self.dev.as_mut() else {
                 return;
             };
-            // A failed read surfaces on the next command; keep the configured lighting.
+            // A failed read surfaces on the next command; keep the configured layer.
             let Ok(block) = dev.read_block(p) else {
                 return;
             };
-            let lighting = encode::decode_lighting(&block);
-            self.emit(Update::KeypadLighting(p, Box::new(lighting)));
+            self.emit(Update::KeypadBlock(p, Box::new(block)));
         }
     }
 
@@ -324,7 +321,7 @@ impl Worker {
             detail,
         });
         if self.mode == Mode::Hardware {
-            self.read_lighting();
+            self.read_layers();
         }
         self.read_active_profile()
     }

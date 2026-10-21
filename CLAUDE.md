@@ -126,8 +126,10 @@ GUI (`just gui --simulate` or `target/debug/falcon-gui [--simulate] [--config FI
   "Apply to keypad"/Auto-apply (1000 ms debounce, one in flight, skipped when the keypad already holds the value —
   each write costs flash) = `apply_lighting` (no `0x06`, still persistent).
   Orange dot on a layer = keys/lighting differ from what the keypad is believed to hold (sim boots factory defaults;
-  hardware: keys are assumed to match the file, lighting is read from the keypad — `0x82` ×5 at connect and Refresh,
-  `Update::KeypadLighting` replaces the configured lighting; macros cannot be read back, so keys are not).
+  hardware: every layer is read from the keypad — `0x82` ×5 at connect and Refresh, `Update::KeypadBlock` →
+  `LayerBackup::apply_to_profile`: lighting and every key whose device byte differs are adopted; keys that already
+  match keep their config value. Macro keys (`F8`) whose macro the config lacks stay as configured and are marked as
+  differing, because macro contents cannot be read back).
 - The edited layer follows the keypad: `0x81` at connect and Refresh, our own selects and `ProfileChanged` events.
   `HostCode` events trigger a refresh. `HostKey` runs the key's `LaunchProgram` (macOS `open`/`open -a`).
   `CommandAck`/`MouseReport` only show in the packet log. Firmware shows "n/a" (the 264-byte `0x80` is not implemented).

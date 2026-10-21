@@ -111,7 +111,7 @@ impl FalconApp {
             Update::Written(p, profile) => self.mark_written(p, *profile),
             Update::BackupReady(backup) => self.save_backup(&backup),
             Update::Restored(layer) => self.mark_restored(&layer),
-            Update::KeypadLighting(p, lighting) => self.adopt_keypad_lighting(p, *lighting),
+            Update::KeypadBlock(p, block) => self.adopt_keypad_block(p, &block),
             Update::Done { job, result } => {
                 self.busy = self.busy.saturating_sub(1);
                 if matches!(job, Job::ApplyLighting(_)) {

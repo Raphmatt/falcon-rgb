@@ -17,7 +17,7 @@ use std::time::Duration;
 use falcon_core::protocol::{Block, PROFILE_COUNT};
 use falcon_core::{
     AsyncFalcon, AsyncRecorder, Backup, Config, DeviceEvent, Falcon, FirmwareVersion, InputReport,
-    LayerBackup, Lighting, PacketRecord, Profile, Recorder, ReportLen, Result, encode,
+    LayerBackup, Lighting, PacketRecord, Profile, Recorder, ReportLen, Result,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -318,13 +318,13 @@ impl Worker {
         });
         let _ = self.read_active_profile().await;
         if !simulated {
-            self.read_lighting().await;
+            self.read_layers().await;
         }
         self.flush_log();
     }
 
-    /// Every layer's lighting from the keypad (`0x82` ×5), as in the desktop worker.
-    async fn read_lighting(&mut self) {
+    /// Every layer's block from the keypad (`0x82` ×5), as in the desktop worker.
+    async fn read_layers(&mut self) {
         for p in 0..PROFILE_COUNT {
             let Some(dev) = self.dev.as_mut() else {
                 return;
@@ -332,8 +332,7 @@ impl Worker {
             let Ok(block) = dev.read_block(p).await else {
                 return;
             };
-            let lighting = encode::decode_lighting(&block);
-            self.emit(Update::KeypadLighting(p, Box::new(lighting)));
+            self.emit(Update::KeypadBlock(p, Box::new(block)));
         }
     }
 
@@ -414,7 +413,7 @@ impl Worker {
             detail,
         });
         if self.mode == Mode::Hardware {
-            self.read_lighting().await;
+            self.read_layers().await;
         }
         self.read_active_profile().await
     }

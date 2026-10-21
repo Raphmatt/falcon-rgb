@@ -439,3 +439,40 @@ mod tests {
         assert_eq!(layer.macro_keys_without_macro(), vec![4]);
     }
 }
+
+#[cfg(test)]
+mod real_keymap {
+    use super::*;
+    use crate::hex;
+
+    /// Layer 1 as read from a real keypad (browser log, 2026-10-21): media keys and disabled
+    /// keys set with the app; bytes 0..24 of the block, by hw index.
+    const LAYER1_KEYMAP: &str =
+        "00 A6 00 00 00 B4 A7 00 00 00 B5 A8 BB 00 00 00 AB AA 00 00 BB 00 BC B9 00";
+
+    #[test]
+    fn every_key_of_a_real_layer_is_recognised() {
+        let mut block = crate::transport::SimulatedDevice::initial_block(0);
+        block[..25].copy_from_slice(&hex::parse(LAYER1_KEYMAP).unwrap());
+        let layer = LayerBackup {
+            layer: 1,
+            block,
+            macros: vec![],
+        };
+        let mut p = Profile::default_for(0);
+        assert_eq!(layer.apply_to_profile(&mut p), Vec::<usize>::new());
+        let by_hw = |hw: u8| &p.keys[layout::hw_to_k(hw).unwrap()];
+        assert_eq!(by_hw(0), &KeyAssignment::Disabled);
+        assert_eq!(by_hw(1), &KeyAssignment::Function(Function::PrevTrack));
+        assert_eq!(by_hw(5), &KeyAssignment::Default, "Layer 1 key is factory");
+        assert_eq!(by_hw(6), &KeyAssignment::Function(Function::PlayPause));
+        assert_eq!(by_hw(11), &KeyAssignment::Function(Function::NextTrack));
+        assert_eq!(by_hw(16), &KeyAssignment::Function(Function::VolumeUp));
+        assert_eq!(by_hw(17), &KeyAssignment::Function(Function::VolumeDown));
+        // Writing the adopted profile back produces exactly the keypad's key map.
+        let mut out = block;
+        encode::apply_keymap(&p.keys, &mut out);
+        assert_eq!(&out[..25], &block[..25]);
+        assert_eq!(by_hw(12), &KeyAssignment::Key(0xBB), "LED Brightness key");
+    }
+}
