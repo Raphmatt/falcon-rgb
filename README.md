@@ -57,6 +57,8 @@ Requires a recent stable Rust toolchain (edition 2024) and optionally
 [just](https://github.com/casey/just) and [cargo-nextest](https://nexte.st).
 
 ```sh
+git clone https://github.com/Raphmatt/falcon-rgb.git
+cd falcon-rgb
 just build                 # or: cargo build --workspace
 just gui                   # desktop app
 just gui --simulate        # desktop app against a simulated keypad
