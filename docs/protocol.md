@@ -267,6 +267,12 @@ On the device (hardware-confirmed):
   `0x81` still reports the old active layer. After a layer switch or replug the active layer's lighting is shown again.
   This can be used as a live preview.
 
+Backups (falcon-rgb, `*.falcon-backup.json`): a layer's whole state on the keypad is its 200-byte block, so a backup
+is the `0x82` block of every layer, written back unchanged with `0x02` (then `0x06`). Macro contents are stored
+separately and cannot be read back. A backup therefore also carries the macros the app's config holds for keys whose
+device byte is `F8`, and a restore re-uploads them with `0x05`. Macro keys without such a macro keep whatever macro the
+keypad currently stores. Raw `falcon dump --out` files (264-byte `0x82` replies) restore as single layers.
+
 On the host, falcon-rgb stores its own JSON (5 profiles plus global settings) in
 `~/Library/Application Support/falcon-rgb/` on macOS, and in the platform's config directory elsewhere. Importing
 profile files of the official Windows software is a possible future feature; their format is not documented here.

@@ -16,8 +16,8 @@ use std::time::Duration;
 
 use falcon_core::protocol::{Block, PROFILE_COUNT};
 use falcon_core::{
-    AsyncFalcon, AsyncRecorder, DeviceEvent, Falcon, FirmwareVersion, InputReport, Lighting,
-    PacketRecord, Profile, Recorder, ReportLen, Result, encode,
+    AsyncFalcon, AsyncRecorder, Backup, Config, DeviceEvent, Falcon, FirmwareVersion, InputReport,
+    LayerBackup, Lighting, PacketRecord, Profile, Recorder, ReportLen, Result, encode,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -78,6 +78,20 @@ impl Dev {
         }
         .ok()
         .flatten()
+    }
+
+    async fn backup(&mut self, config: &Config) -> Result<Backup> {
+        match self {
+            Self::Sim(d) => d.backup(config, super::now_unix()),
+            Self::Hid(d) => d.backup(config, super::now_unix()).await,
+        }
+    }
+
+    async fn restore_layer(&mut self, p: usize, layer: &LayerBackup) -> Result<()> {
+        match self {
+            Self::Sim(d) => d.restore_layer(p, layer),
+            Self::Hid(d) => d.restore_layer(p, layer).await,
+        }
     }
 
     async fn read_block(&mut self, p: usize) -> Result<Block> {
@@ -366,6 +380,17 @@ impl Worker {
             }
             Command::Simulate(action) => (Job::Simulate, self.simulate(action)),
             Command::Pair => (Job::Pair, self.pair().await),
+            Command::Backup(config) => {
+                let r = match self.dev.as_mut() {
+                    Some(d) => d.backup(&config).await.map_err(|e| e.to_string()),
+                    None => Err("keypad not connected".into()),
+                };
+                (
+                    Job::Backup,
+                    r.map(|b| self.emit(Update::BackupReady(Box::new(b)))),
+                )
+            }
+            Command::Restore(backup) => (Job::Restore, self.restore(*backup).await),
         };
         self.flush_log();
         self.emit(Update::Done { job, result });
@@ -407,6 +432,37 @@ impl Worker {
             Some(device) => self.open(device, false).await,
             None => Ok(()),
         }
+    }
+
+    /// Writes every layer of `backup`, then selects its active layer.
+    async fn restore(&mut self, backup: Backup) -> Result<(), String> {
+        backup.validate().map_err(|e| e.to_string())?;
+        let total = backup.layers.len();
+        for (i, layer) in backup.layers.into_iter().enumerate() {
+            self.emit(Update::Progress {
+                done: i,
+                total,
+                what: format!("Restoring layer {}", layer.layer),
+            });
+            let dev = self.dev.as_mut().ok_or("keypad not connected")?;
+            dev.restore_layer(layer.layer - 1, &layer)
+                .await
+                .map_err(|e| format!("layer {}: {e}", layer.layer))?;
+            self.flush_log();
+            self.emit(Update::Restored(Box::new(layer)));
+        }
+        if let Some(a) = backup.active_layer
+            && let Some(dev) = self.dev.as_mut()
+            && dev.select_profile(a - 1).await.is_ok()
+        {
+            self.emit(Update::ActiveProfile(a - 1));
+        }
+        self.emit(Update::Progress {
+            done: total,
+            total,
+            what: "Done".into(),
+        });
+        Ok(())
     }
 
     async fn write_profiles(&mut self, list: Vec<(usize, Profile)>) -> Result<(), String> {

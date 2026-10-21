@@ -104,6 +104,11 @@ keypad, USB `195D:6008`). Target: macOS first, portable to Windows/Linux via hid
   0x80/0x81/0x82 queries still reach the keypad), `-v`/`-vv` packet log, `--config FILE`.
 - Read: `list`, `doctor`, `version [--len auto|264|8]` (8 refused on macOS), `profile get`, `dump N [--out pN.bin]`,
   `show-config`, `listen [--seconds N]` (prints `ack 0x81 → 2` for echoes, `mouse report (ignored)`), `keys`.
+- Backup: `backup [--out FILE]` (JSON, `falcon_core::backup`: the raw `0x82` block of every layer plus config
+  macros of `F8` keys), `restore FILE [--layer N [--to M]] [--yes]` (also takes `dump --out` .bin files; asks unless
+  `--yes`/`--simulate`/`--dry-run`; afterwards the config follows the restored layers via
+  `LayerBackup::apply_to_profile`). GUI: Layer tab → Back up keypad… / Restore backup… (worker `Command::Backup` /
+  `Restore`, confirmation modal).
 - Write (config is updated first, then sent): `profile set N`,
   `effect wave --direction to-left|to-right|down|up|0..3 --brightness 1..5` (1 = off; bare `left`/`right` refused),
   `key-color 5|bar:lu RRGGBB`, `remap K kp_7|0x2c|ctrl+c|volume-up|disable|default|launch:PATH`,

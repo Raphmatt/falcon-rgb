@@ -16,7 +16,8 @@ use std::time::{Duration, Instant};
 use falcon_core::protocol::PROFILE_COUNT;
 use falcon_core::transport::hid::{self, HidTransport};
 use falcon_core::{
-    DeviceEvent, Error, Falcon, FirmwareVersion, Profile, Recorder, ReportLen, Transport, encode,
+    Backup, DeviceEvent, Error, Falcon, FirmwareVersion, Profile, Recorder, ReportLen, Transport,
+    encode,
 };
 
 use super::{Command, Connection, Job, Mode, SharedSim, SimAction, Update};
@@ -282,6 +283,19 @@ impl Worker {
             Command::Simulate(action) => (Job::Simulate, self.simulate(action)),
             // Desktop builds find the keypad on their own.
             Command::Pair => (Job::Pair, Ok(())),
+            Command::Backup(config) => {
+                let r = match self.dev.as_mut() {
+                    Some(d) => d
+                        .backup(&config, super::now_unix())
+                        .map_err(|e| e.to_string()),
+                    None => Err("keypad not connected".into()),
+                };
+                (
+                    Job::Backup,
+                    r.map(|b| self.emit(Update::BackupReady(Box::new(b)))),
+                )
+            }
+            Command::Restore(backup) => (Job::Restore, self.restore(*backup)),
         };
         self.flush_log();
         self.emit(Update::Done { job, result });
@@ -313,6 +327,34 @@ impl Worker {
             self.read_lighting();
         }
         self.read_active_profile()
+    }
+
+    /// Writes every layer of `backup`, then selects its active layer.
+    fn restore(&mut self, backup: Backup) -> Result<(), String> {
+        backup.validate().map_err(|e| e.to_string())?;
+        let total = backup.layers.len();
+        for (i, layer) in backup.layers.into_iter().enumerate() {
+            self.emit(Update::Progress {
+                done: i,
+                total,
+                what: format!("Restoring layer {}", layer.layer),
+            });
+            self.with_dev(|d| d.restore_layer(layer.layer - 1, &layer))
+                .map_err(|e| format!("layer {}: {e}", layer.layer))?;
+            self.flush_log();
+            self.emit(Update::Restored(Box::new(layer)));
+        }
+        if let Some(a) = backup.active_layer
+            && self.with_dev(|d| d.select_profile(a - 1)).is_ok()
+        {
+            self.emit(Update::ActiveProfile(a - 1));
+        }
+        self.emit(Update::Progress {
+            done: total,
+            total,
+            what: "Done".into(),
+        });
+        Ok(())
     }
 
     fn write_profiles(&mut self, list: Vec<(usize, Profile)>) -> Result<(), String> {

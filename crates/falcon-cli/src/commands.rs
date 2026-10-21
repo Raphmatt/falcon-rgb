@@ -16,8 +16,8 @@ use falcon_core::protocol::{
 };
 use falcon_core::transport::hid::{CollectionInfo, list_collections};
 use falcon_core::{
-    Config, DeviceEvent, Effect, KeyAssignment, Macro, Repeat, Rgb, Transport, WaveDirection, hex,
-    store,
+    Backup, Config, DeviceEvent, Effect, KeyAssignment, LayerBackup, Macro, Repeat, Rgb, Transport,
+    WaveDirection, hex, store,
 };
 
 use crate::backend::{self, Backend, print_log, reply_note};
@@ -466,6 +466,123 @@ pub fn dump(g: &Global, profile: usize, out: Option<&Path>) -> Result<()> {
     if let Some(path) = out {
         std::fs::write(path, &reply).with_context(|| format!("cannot write {}", path.display()))?;
         println!("\nsaved {} bytes to {}", reply.len(), path.display());
+    }
+    print_log(&b, g.verbose);
+    Ok(())
+}
+
+/// Seconds since the epoch and a `YYYYMMDD-HHMMSS` (UTC) stamp for file names.
+fn now_stamp() -> (u64, String) {
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let days = (secs / 86_400) as i64;
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    let t = secs % 86_400;
+    let stamp = format!(
+        "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
+        t / 3600,
+        t / 60 % 60,
+        t % 60
+    );
+    (secs, stamp)
+}
+
+pub fn backup(g: &Global, out: Option<PathBuf>) -> Result<()> {
+    let (_, cfg) = load(g)?;
+    let mut b = backend::open(g, false)?;
+    let (secs, stamp) = now_stamp();
+    let backup = b.dev.backup(&cfg, Some(secs))?;
+    backup.validate()?;
+    let path = out.unwrap_or_else(|| PathBuf::from(format!("falcon-backup-{stamp}.json")));
+    std::fs::write(&path, backup.to_json()?)
+        .with_context(|| format!("cannot write {}", path.display()))?;
+    for l in &backup.layers {
+        println!("{}", l.summary());
+    }
+    if let Some(a) = backup.active_layer {
+        println!("active layer: {a}");
+    }
+    println!("saved {}", path.display());
+    print_log(&b, g.verbose);
+    Ok(())
+}
+
+pub fn restore(
+    g: &Global,
+    file: &Path,
+    layer: Option<usize>,
+    to: Option<usize>,
+    yes: bool,
+) -> Result<()> {
+    let data = std::fs::read(file).with_context(|| format!("cannot read {}", file.display()))?;
+    let backup = Backup::from_bytes(&data)
+        .with_context(|| format!("{} is not a usable backup", file.display()))?;
+    // (backed-up layer, 0-based keypad target)
+    let plan: Vec<(&LayerBackup, usize)> = match layer {
+        Some(p) => {
+            let l = backup
+                .layer(p + 1)
+                .with_context(|| format!("{} has no layer {}", file.display(), p + 1))?;
+            vec![(l, to.unwrap_or(p))]
+        }
+        None => backup.layers.iter().map(|l| (l, l.layer - 1)).collect(),
+    };
+    println!("Restoring from {}:", file.display());
+    for (l, target) in &plan {
+        let onto = if l.layer - 1 == *target {
+            String::new()
+        } else {
+            format!(" → keypad layer {}", target + 1)
+        };
+        println!("  {}{onto}", l.summary());
+    }
+    if !(yes || g.simulate || g.dry_run) {
+        use std::io::{BufRead, IsTerminal, Write};
+        if !std::io::stdin().is_terminal() {
+            bail!("not a terminal: pass --yes to restore without asking");
+        }
+        print!("This overwrites those layers on the keypad. Type \"yes\" to continue: ");
+        std::io::stdout().flush()?;
+        let mut answer = String::new();
+        std::io::stdin().lock().read_line(&mut answer)?;
+        if answer.trim() != "yes" {
+            bail!("cancelled, nothing written");
+        }
+    }
+
+    let (path, mut cfg) = load(g)?;
+    let mut b = backend::open(g, false)?;
+    let mut unknown = Vec::new();
+    for (l, target) in &plan {
+        b.dev.restore_layer(*target, l)?;
+        println!("{}layer {} restored", tag(&b), target + 1);
+        for k in l.apply_to_profile(&mut cfg.profiles[*target]) {
+            unknown.push(format!("{}/{k}", target + 1));
+        }
+    }
+    if layer.is_none()
+        && let Some(a) = backup.active_layer
+    {
+        b.dev.select_profile(a - 1)?;
+        cfg.active_profile = a - 1;
+        println!("{}active layer {a}", tag(&b));
+    }
+    save(g, &path, &cfg)?;
+    if !unknown.is_empty() {
+        println!(
+            "config: macro keys (layer/key) {} keep their configured assignment; the backup has no macro for them",
+            unknown.join(", ")
+        );
     }
     print_log(&b, g.verbose);
     Ok(())

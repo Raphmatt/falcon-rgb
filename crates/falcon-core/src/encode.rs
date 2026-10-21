@@ -259,29 +259,56 @@ pub fn plan_full_download(
     apply_profile_to_block(profile, &mut block);
     let mut steps = vec![write_block_step(profile_idx, &block)?];
     for (k, assignment) in profile.keys.iter().enumerate() {
-        let Some(mblock) = macro_block(assignment).map_err(|e| e.in_key(k))? else {
-            continue;
-        };
-        let hw = K_TO_HW[k];
-        for (i, chunk) in macro_chunks(&mblock).iter().enumerate() {
-            let n = i as u8 + 1;
-            let wait = if i + 1 == MACRO_CHUNKS {
-                delay::MACRO_LAST
-            } else {
-                delay::MACRO_CHUNK
-            };
-            steps.push(Step::set(
-                protocol::write_macro_request(profile_idx, hw, n, chunk)?,
-                wait,
-                format!("macro key {} (hw {hw}) chunk {n}/3", k + 1),
-            ));
-        }
+        steps.extend(macro_steps(profile_idx, k, assignment)?);
     }
-    steps.push(Step::set(
-        protocol::commit_request(),
-        delay::COMMIT,
-        "commit",
-    ));
+    steps.push(commit_step());
+    Ok(steps)
+}
+
+/// The three `0x05` chunks for key `k` if `assignment` needs a macro upload, else nothing.
+pub fn macro_steps(profile_idx: usize, k: usize, assignment: &KeyAssignment) -> Result<Vec<Step>> {
+    let Some(mblock) = macro_block(assignment).map_err(|e| e.in_key(k))? else {
+        return Ok(Vec::new());
+    };
+    let hw = K_TO_HW[k];
+    let mut steps = Vec::with_capacity(MACRO_CHUNKS);
+    for (i, chunk) in macro_chunks(&mblock).iter().enumerate() {
+        let n = i as u8 + 1;
+        let wait = if i + 1 == MACRO_CHUNKS {
+            delay::MACRO_LAST
+        } else {
+            delay::MACRO_CHUNK
+        };
+        steps.push(Step::set(
+            protocol::write_macro_request(profile_idx, hw, n, chunk)?,
+            wait,
+            format!("macro key {} (hw {hw}) chunk {n}/3", k + 1),
+        ));
+    }
+    Ok(steps)
+}
+
+fn commit_step() -> Step {
+    Step::set(protocol::commit_request(), delay::COMMIT, "commit")
+}
+
+/// Restore of a backed-up layer (spec §9): `0x02` with the block exactly as backed up, the
+/// backup's macros, then `0x06`. `profile_idx` may differ from the layer it was taken from.
+pub fn plan_restore(profile_idx: usize, layer: &crate::backup::LayerBackup) -> Result<Vec<Step>> {
+    check_profile(profile_idx)?;
+    let mut steps = vec![write_block_step(profile_idx, &layer.block)?];
+    for m in &layer.macros {
+        let k =
+            m.key
+                .checked_sub(1)
+                .filter(|&k| k < KEY_COUNT)
+                .ok_or(crate::error::Error::Backup(format!(
+                    "macro key {} out of range",
+                    m.key
+                )))?;
+        steps.extend(macro_steps(profile_idx, k, &m.assignment)?);
+    }
+    steps.push(commit_step());
     Ok(steps)
 }
 

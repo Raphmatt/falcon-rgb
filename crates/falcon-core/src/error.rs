@@ -34,6 +34,8 @@ pub enum Error {
     ConfigCollectionNotFound,
     #[error("HID: {0}")]
     Hid(String),
+    #[error("backup: {0}")]
+    Backup(String),
     #[error("simulated device: {0}")]
     Sim(String),
     #[error(transparent)]

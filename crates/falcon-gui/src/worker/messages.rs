@@ -1,6 +1,8 @@
 //! Messages between the UI and the worker thread.
 
-use falcon_core::{FirmwareVersion, InputReport, Lighting, PacketRecord, Profile};
+use falcon_core::{
+    Backup, Config, FirmwareVersion, InputReport, LayerBackup, Lighting, PacketRecord, Profile,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
@@ -32,6 +34,10 @@ pub enum Command {
     /// Full downloads (Windows "Save") of these profiles, in order.
     WriteProfiles(Vec<(usize, Profile)>),
     Simulate(SimAction),
+    /// Read every layer into a [`Backup`]; macros of macro keys come from this config.
+    Backup(Box<Config>),
+    /// Write every layer of the backup back (and select its active layer).
+    Restore(Box<Backup>),
     /// Browser: show the WebHID device chooser (must follow a click). Ignored natively.
     Pair,
     Shutdown,
@@ -73,6 +79,8 @@ pub enum Job {
     Write(Vec<usize>),
     Simulate,
     Pair,
+    Backup,
+    Restore,
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +98,10 @@ pub enum Update {
     },
     /// One profile of a [`Command::WriteProfiles`] reached the device.
     Written(usize, Box<Profile>),
+    /// Result of [`Command::Backup`].
+    BackupReady(Box<Backup>),
+    /// One layer of a [`Command::Restore`] reached the keypad.
+    Restored(Box<LayerBackup>),
     /// Lighting of a layer as stored on the real keypad (`0x82` at connect and refresh).
     KeypadLighting(usize, Box<Lighting>),
     Done {

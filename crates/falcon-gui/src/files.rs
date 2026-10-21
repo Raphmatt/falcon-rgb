@@ -4,10 +4,10 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// A picked text file: (display name, contents) or an error.
-pub type Picked = Result<(String, String), String>;
+/// A picked file: (display name, contents) or an error.
+pub type Picked = Result<(String, Vec<u8>), String>;
 
-/// Receives the result of [`Inbox::open_text`], possibly a few frames later.
+/// Receives the result of [`Inbox::open`], possibly a few frames later.
 #[derive(Debug, Clone, Default)]
 pub struct Inbox(Rc<RefCell<Option<Picked>>>);
 
@@ -16,17 +16,18 @@ impl Inbox {
         self.0.borrow_mut().take()
     }
 
-    /// Lets the user pick a JSON file; `repaint` is called once it has been read.
+    /// Lets the user pick a file with one of `extensions`; `repaint` is called once it has
+    /// been read.
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn open_text(&self, title: &str, repaint: impl FnOnce()) {
+    pub fn open(&self, title: &str, extensions: &[&str], repaint: impl FnOnce()) {
         let Some(path) = rfd::FileDialog::new()
             .set_title(title)
-            .add_filter("Falcon layer", &["json"])
+            .add_filter("Falcon file", extensions)
             .pick_file()
         else {
             return;
         };
-        let result = std::fs::read_to_string(&path)
+        let result = std::fs::read(&path)
             .map(|s| (path.display().to_string(), s))
             .map_err(|e| e.to_string());
         *self.0.borrow_mut() = Some(result);
@@ -34,18 +35,16 @@ impl Inbox {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn open_text(&self, title: &str, repaint: impl FnOnce() + 'static) {
+    pub fn open(&self, title: &str, extensions: &[&str], repaint: impl FnOnce() + 'static) {
         let slot = self.0.clone();
         let dialog = rfd::AsyncFileDialog::new()
             .set_title(title)
-            .add_filter("Falcon layer", &["json"]);
+            .add_filter("Falcon file", extensions);
         wasm_bindgen_futures::spawn_local(async move {
             let Some(file) = dialog.pick_file().await else {
                 return;
             };
-            let result = String::from_utf8(file.read().await)
-                .map(|s| (file.file_name(), s))
-                .map_err(|e| e.to_string());
+            let result = Ok((file.file_name(), file.read().await));
             *slot.borrow_mut() = Some(result);
             repaint();
         });
@@ -58,7 +57,7 @@ pub fn save_text(title: &str, file_name: &str, text: &str) -> Result<Option<Stri
     let Some(path) = rfd::FileDialog::new()
         .set_title(title)
         .set_file_name(file_name)
-        .add_filter("Falcon layer", &["json"])
+        .add_filter("JSON", &["json"])
         .save_file()
     else {
         return Ok(None);

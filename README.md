@@ -87,6 +87,9 @@ falcon effect wave --direction to-right
 falcon remap 1 ctrl+c
 falcon macro 2 --events "down:lshift tap:h up:lshift tap:i"
 falcon listen --seconds 30                    # print events from the keypad
+falcon backup                                 # all layers → falcon-backup-<date>.json
+falcon restore falcon-backup-<date>.json      # write them back (asks first)
+falcon restore backup.json --layer 2 --to 4   # one layer onto another
 falcon --simulate --dry-run -v remap 3 kp_7   # show the packets without hardware
 ```
 
@@ -99,7 +102,9 @@ falcon --simulate --dry-run -v remap 3 kp_7   # show the packets without hardwar
 - On macOS, 8-byte feature reports make the keypad stop responding until it is replugged, so
   the tool never sends them there. The `raw` and `experimental` commands are for protocol work
   only.
-- Back up your layers before experimenting: `falcon dump 1 --out p1.bin` (repeat for 2–5).
+- Back up the keypad before experimenting: `falcon backup`, or *Back up keypad…* on the
+  app's Layer tab. Restore writes every layer back. Macro contents can't be read from the
+  keypad, so a backup only holds the macros the app itself knows.
 
 ## Disclaimer
 

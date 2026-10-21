@@ -5,10 +5,11 @@
 
 use std::time::Duration;
 
+use crate::backup::{Backup, LayerBackup};
 use crate::device::InputReport;
 use crate::encode::{self, Step, StepKind};
 use crate::error::Result;
-use crate::model::{Lighting, Profile};
+use crate::model::{Config, Lighting, Profile};
 use crate::protocol::{
     self, Block, FirmwareVersion, REPORT_ID, ReportLen, delay, parse_input_report,
 };
@@ -204,6 +205,23 @@ impl<T: AsyncTransport> AsyncFalcon<T> {
         self.execute(&steps).await.map(drop)
     }
 
+    /// Whole-keypad backup; see [`crate::Falcon::backup`].
+    pub async fn backup(&mut self, config: &Config, created_unix: Option<u64>) -> Result<Backup> {
+        let active = self.current_profile().await.ok();
+        let mut blocks = Vec::with_capacity(protocol::PROFILE_COUNT);
+        for p in 0..protocol::PROFILE_COUNT {
+            blocks.push((p, self.read_block(p).await?));
+        }
+        Ok(Backup::from_blocks(&blocks, active, config, created_unix))
+    }
+
+    /// Restores one layer; see [`crate::Falcon::restore_layer`].
+    pub async fn restore_layer(&mut self, profile_idx: usize, layer: &LayerBackup) -> Result<()> {
+        layer.validate()?;
+        let steps = encode::plan_restore(profile_idx, layer)?;
+        self.execute(&steps).await.map(drop)
+    }
+
     /// The next input report already received, if any.
     pub fn poll_event(&mut self) -> Result<Option<InputReport>> {
         Ok(self.transport.try_event()?.map(|raw| InputReport {
@@ -278,6 +296,8 @@ mod tests {
         s.write_profile(1, &p).unwrap();
         s.apply_lighting(3, &l).unwrap();
         assert_eq!(s.firmware_version(ReportLen::Long).unwrap(), None);
+        let backup = s.backup(&Config::default(), None).unwrap();
+        s.restore_layer(4, &backup.layers[1]).unwrap();
 
         pollster::block_on(async {
             assert_eq!(a.current_profile().await.unwrap(), 0);
@@ -285,6 +305,9 @@ mod tests {
             a.write_profile(1, &p).await.unwrap();
             a.apply_lighting(3, &l).await.unwrap();
             assert_eq!(a.firmware_version(ReportLen::Long).await.unwrap(), None);
+            let b = a.backup(&Config::default(), None).await.unwrap();
+            assert_eq!(b, backup);
+            a.restore_layer(4, &b.layers[1]).await.unwrap();
         });
 
         assert_eq!(s.transport().log(), a.transport().log());

@@ -7,9 +7,10 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
+use crate::backup::{Backup, LayerBackup};
 use crate::encode::{self, Step, StepKind};
 use crate::error::Result;
-use crate::model::{Lighting, Profile};
+use crate::model::{Config, Lighting, Profile};
 use crate::protocol::{
     self, Block, DeviceEvent, FirmwareVersion, REPORT_ID, ReportLen, delay, parse_input_report,
 };
@@ -145,6 +146,26 @@ impl<T: Transport> Falcon<T> {
         self.execute(&steps).map(drop)
     }
 
+    /// Whole-keypad backup (spec §9): the active layer (`0x81`) and every layer's block
+    /// (`0x82` ×5). Macro contents cannot be read from the keypad; those of `F8` keys come from
+    /// `config`.
+    pub fn backup(&mut self, config: &Config, created_unix: Option<u64>) -> Result<Backup> {
+        let active = self.current_profile().ok();
+        let mut blocks = Vec::with_capacity(protocol::PROFILE_COUNT);
+        for p in 0..protocol::PROFILE_COUNT {
+            blocks.push((p, self.read_block(p)?));
+        }
+        Ok(Backup::from_blocks(&blocks, active, config, created_unix))
+    }
+
+    /// Writes a backed-up layer to `profile_idx` (0-based): the block unchanged, its macros,
+    /// `0x06` ([`encode::plan_restore`]).
+    pub fn restore_layer(&mut self, profile_idx: usize, layer: &LayerBackup) -> Result<()> {
+        layer.validate()?;
+        let steps = encode::plan_restore(profile_idx, layer)?;
+        self.execute(&steps).map(drop)
+    }
+
     /// Experimental: polling rate `0..=3` (`1 << rate`, 8-byte `0x01` only) **[HW-VERIFY]**. The
     /// 264-byte form of the same command byte selects profiles, so it is never sent; the 8-byte
     /// form fails on macOS.
@@ -181,11 +202,71 @@ mod tests {
     use crate::error::Error;
     use crate::layout::{FACTORY_KEYMAP, K_TO_HW};
     use crate::model::{Effect, KeyAssignment, Macro, MacroEvent, Repeat, Rgb};
-    use crate::protocol::cmd;
+    use crate::protocol::{Block, cmd};
     use crate::transport::{PacketDir, SimulatedDevice};
 
     fn sim() -> Falcon<SimulatedDevice> {
         Falcon::new(SimulatedDevice::new())
+    }
+
+    #[test]
+    fn backup_and_restore_round_trip() {
+        let mut f = sim();
+        // A keypad with a macro on layer 2 key 2 and custom lighting, configured like the app.
+        let mut config = Config::default();
+        let mut p = Profile::default_for(1);
+        p.keys[1] = KeyAssignment::Macro(Macro {
+            repeat: Repeat::Times(1),
+            events: vec![MacroEvent::down(0x0B, 1), MacroEvent::up(0x0B, 1)],
+        });
+        p.lighting.effect = Effect::Custom;
+        p.lighting.key_colors[3] = Rgb::new(9, 8, 7);
+        f.write_profile(1, &p).unwrap();
+        config.profiles[1] = p;
+        f.select_profile(1).unwrap();
+        let hw = K_TO_HW[1];
+        let macro_before = *f.transport().macro_block(1, hw).unwrap();
+        let blocks_before: Vec<Block> = (0..5).map(|i| *f.transport().block(i)).collect();
+
+        let backup = f.backup(&config, Some(1)).unwrap();
+        assert_eq!(backup.active_layer, Some(2));
+        assert_eq!(backup.layers.len(), 5);
+        assert_eq!(backup.layers[1].macros.len(), 1);
+        assert!(
+            backup
+                .layers
+                .iter()
+                .all(|l| l.macro_keys_without_macro().is_empty())
+        );
+
+        // Change everything, then restore all layers.
+        let mut other = Profile::default_for(0);
+        other.keys[1] = KeyAssignment::Macro(Macro {
+            repeat: Repeat::Times(3),
+            events: vec![MacroEvent::down(0x04, 1), MacroEvent::up(0x04, 1)],
+        });
+        other.lighting.color = Rgb::new(1, 1, 1);
+        for i in 0..5 {
+            f.write_profile(i, &other).unwrap();
+        }
+        assert_ne!(f.transport().block(1), &blocks_before[1]);
+        let commits = f.transport().commit_count();
+        for l in &backup.layers {
+            f.restore_layer(l.layer - 1, l).unwrap();
+        }
+        for (i, before) in blocks_before.iter().enumerate() {
+            assert_eq!(f.transport().block(i), before, "layer {}", i + 1);
+        }
+        assert_eq!(f.transport().macro_block(1, hw).unwrap(), &macro_before);
+        assert_eq!(f.transport().commit_count(), commits + 5);
+
+        // A restore to another layer, and refusals.
+        f.restore_layer(4, &backup.layers[1]).unwrap();
+        assert_eq!(f.transport().block(4), &blocks_before[1]);
+        let mut broken = backup.layers[0].clone();
+        broken.block[131] = 0;
+        assert!(f.restore_layer(0, &broken).is_err());
+        assert!(f.restore_layer(5, &backup.layers[0]).is_err());
     }
 
     #[test]

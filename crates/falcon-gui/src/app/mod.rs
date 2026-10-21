@@ -114,6 +114,9 @@ pub struct FalconApp {
     pub front_app: Option<FrontApp>,
     /// Layer file picked for import, possibly arriving frames after the dialog (browser).
     pub import_inbox: crate::files::Inbox,
+    /// Backup file picked for restore, and the parsed backup waiting for confirmation.
+    pub restore_inbox: crate::files::Inbox,
+    pub pending_restore: Option<(String, falcon_core::Backup)>,
     watcher: autoswitch::Watcher,
     started: Instant,
 }
@@ -165,6 +168,8 @@ impl FalconApp {
             new_linked_app: String::new(),
             front_app: None,
             import_inbox: Default::default(),
+            restore_inbox: Default::default(),
+            pending_restore: None,
             watcher,
             started: Instant::now(),
         };
@@ -259,6 +264,7 @@ impl eframe::App for FalconApp {
         self.watcher.set_enabled(self.config.settings.auto_switch);
         self.process_front_apps();
         views::layer::finish_import(self);
+        views::layer::finish_restore_pick(self);
         if let Some(wait) = self.auto_apply_tick() {
             ctx.request_repaint_after(wait);
         }
@@ -302,5 +308,6 @@ impl eframe::App for FalconApp {
             .show(ui, |ui| views::inspector(ui, self));
         egui::CentralPanel::default().show(ui, |ui| views::keypad::show(ui, self));
         views::layer::reset_dialog(ui, self);
+        views::layer::restore_dialog(ui, self);
     }
 }

@@ -40,6 +40,32 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
         }
     });
 
+    heading(ui, "Whole keypad");
+    hint(
+        ui,
+        "A backup holds every layer as stored on the keypad (keys and lighting) plus the macros this app knows. Restore writes it all back.",
+    );
+    ui.horizontal_wrapped(|ui| {
+        let connected = app.connected();
+        if ui
+            .add_enabled(connected, egui::Button::new("Back up keypad…"))
+            .clicked()
+        {
+            app.backup_keypad();
+        }
+        if ui
+            .add_enabled(connected, egui::Button::new("Restore backup…"))
+            .on_hover_text("A .json backup, or a raw layer dump (.bin) from falcon dump --out")
+            .clicked()
+        {
+            let ctx = ui.ctx().clone();
+            app.restore_inbox
+                .open("Restore backup", &["json", "bin"], move || {
+                    ctx.request_repaint()
+                });
+        }
+    });
+
     linked_apps(ui, app);
 
     if app.mode == Mode::Simulated {
@@ -143,7 +169,7 @@ fn export_layer(app: &mut FalconApp) {
 fn import_layer(ui: &egui::Ui, app: &mut FalconApp) {
     let ctx = ui.ctx().clone();
     app.import_inbox
-        .open_text("Import layer", move || ctx.request_repaint());
+        .open("Import layer", &["json"], move || ctx.request_repaint());
 }
 
 /// Applies a picked layer file to the active layer (called every frame by the app).
@@ -151,8 +177,8 @@ pub fn finish_import(app: &mut FalconApp) {
     let Some(picked) = app.import_inbox.take() else {
         return;
     };
-    let result = picked.and_then(|(name, s)| {
-        let p = serde_json::from_str::<Profile>(&s).map_err(|e| e.to_string())?;
+    let result = picked.and_then(|(name, data)| {
+        let p = serde_json::from_slice::<Profile>(&data).map_err(|e| e.to_string())?;
         p.validate().map_err(|e| e.to_string())?;
         Ok((name, p))
     });
@@ -170,6 +196,58 @@ pub fn finish_import(app: &mut FalconApp) {
 }
 
 /// Confirmation dialog for "Reset layer".
+/// Parses a picked backup file; a valid one waits in [`restore_dialog`] for confirmation.
+pub fn finish_restore_pick(app: &mut FalconApp) {
+    let Some(picked) = app.restore_inbox.take() else {
+        return;
+    };
+    match picked.and_then(|(name, data)| {
+        falcon_core::Backup::from_bytes(&data)
+            .map(|b| (name, b))
+            .map_err(|e| e.to_string())
+    }) {
+        Ok(pending) => app.pending_restore = Some(pending),
+        Err(e) => app.error(format!("Not a usable backup: {e}")),
+    }
+}
+
+pub fn restore_dialog(ui: &mut egui::Ui, app: &mut FalconApp) {
+    let Some((name, backup)) = &app.pending_restore else {
+        return;
+    };
+    let lines: Vec<String> = backup.layers.iter().map(|l| l.summary()).collect();
+    let title = format!("Restore {name}?");
+    let mut decision = None;
+    let modal = egui::Modal::new(egui::Id::unique("restore-backup")).show(ui.ctx(), |ui| {
+        ui.set_width(460.0);
+        ui.heading(title);
+        ui.label("These layers on the keypad are overwritten with the backup:");
+        ui.add_space(4.0);
+        for line in &lines {
+            ui.label(RichText::new(line).small());
+        }
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let go = egui::Button::new(RichText::new("Restore").color(egui::Color32::WHITE))
+                .fill(theme::ERR);
+            if ui.add(go).clicked() {
+                decision = Some(true);
+            }
+            if ui.button("Cancel").clicked() {
+                decision = Some(false);
+            }
+        });
+    });
+    if modal.should_close() && decision.is_none() {
+        decision = Some(false);
+    }
+    match decision {
+        Some(true) => app.restore_confirmed(),
+        Some(false) => app.pending_restore = None,
+        None => {}
+    }
+}
+
 pub fn reset_dialog(ui: &mut egui::Ui, app: &mut FalconApp) {
     if !app.confirm_reset {
         return;

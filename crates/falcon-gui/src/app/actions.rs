@@ -52,6 +52,46 @@ impl FalconApp {
         self.send_job(Command::Refresh);
     }
 
+    /// Reads every layer from the keypad into a backup file (saved when it arrives).
+    pub fn backup_keypad(&mut self) {
+        if !self.connected() {
+            self.error("Connect the keypad first");
+            return;
+        }
+        self.send_job(Command::Backup(Box::new(self.config.clone())));
+    }
+
+    /// Writes the confirmed backup to the keypad.
+    pub fn restore_confirmed(&mut self) {
+        let Some((_, backup)) = self.pending_restore.take() else {
+            return;
+        };
+        if !self.connected() {
+            self.error("Connect the keypad first");
+            return;
+        }
+        self.stop_recording();
+        self.send_job(Command::Restore(Box::new(backup)));
+    }
+
+    /// A restored layer is on the keypad: the config and the snapshot follow it.
+    pub(super) fn mark_restored(&mut self, layer: &falcon_core::LayerBackup) {
+        let p = layer.layer - 1;
+        if p >= PROFILE_COUNT {
+            return;
+        }
+        let unknown = layer.apply_to_profile(&mut self.config.profiles[p]);
+        self.device_snapshot[p] = self.config.profiles[p].clone();
+        if !unknown.is_empty() {
+            let keys: Vec<String> = unknown.iter().map(ToString::to_string).collect();
+            self.info(format!(
+                "Layer {}: macro key {} keeps its configured macro (the backup has none for it)",
+                p + 1,
+                keys.join(", ")
+            ));
+        }
+    }
+
     /// Browser: let the user pick the keypad (WebHID chooser).
     pub fn pair(&mut self) {
         self.send_job(Command::Pair);

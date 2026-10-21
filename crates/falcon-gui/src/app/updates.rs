@@ -109,6 +109,8 @@ impl FalconApp {
             }
             Update::Progress { done, total, what } => self.progress = Some((done, total, what)),
             Update::Written(p, profile) => self.mark_written(p, *profile),
+            Update::BackupReady(backup) => self.save_backup(&backup),
+            Update::Restored(layer) => self.mark_restored(&layer),
             Update::KeypadLighting(p, lighting) => self.adopt_keypad_lighting(p, *lighting),
             Update::Done { job, result } => {
                 self.busy = self.busy.saturating_sub(1);
@@ -123,6 +125,7 @@ impl FalconApp {
                         [p] => format!("Saved; layer {} written to the keypad", p + 1),
                         _ => format!("Saved; {} layers written to the keypad", ps.len()),
                     }),
+                    (Job::Restore, Ok(())) => self.info("Backup restored to the keypad"),
                     (Job::ApplyLighting(p), Ok(())) => {
                         self.info(format!("Lighting of layer {} applied", p + 1))
                     }
@@ -130,6 +133,22 @@ impl FalconApp {
                     (job, Err(e)) => self.error(format!("{job:?} failed: {e}")),
                 }
             }
+        }
+    }
+
+    fn save_backup(&mut self, backup: &falcon_core::Backup) {
+        let name = format!(
+            "falcon-backup-{}.json",
+            backup.created_unix.unwrap_or_default()
+        );
+        let result = backup
+            .to_json()
+            .map_err(|e| e.to_string())
+            .and_then(|json| crate::files::save_text("Back up keypad", &name, &json));
+        match result {
+            Ok(Some(place)) => self.info(format!("Keypad backed up to {place}")),
+            Ok(None) => self.info("Backup not saved"),
+            Err(e) => self.error(format!("Backup failed: {e}")),
         }
     }
 

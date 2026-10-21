@@ -16,9 +16,10 @@
 //!   [`Recorder`] and (feature `hid`) the hidapi transport.
 //! - [`device`]: [`Falcon`], the high-level API that executes plans.
 //! - [`asynch`]: [`AsyncFalcon`], the same API over a non-blocking [`AsyncTransport`] (WebHID).
-//! - [`store`]: JSON persistence of the [`Config`].
+//! - [`store`]: JSON persistence of the [`Config`]; [`backup`]: whole-keypad backups.
 
 pub mod asynch;
+pub mod backup;
 pub mod codes;
 pub mod descriptor;
 pub mod device;
@@ -32,6 +33,7 @@ pub mod store;
 pub mod transport;
 
 pub use asynch::{AsyncFalcon, AsyncRecorder, AsyncTransport};
+pub use backup::{Backup, LayerBackup};
 pub use codes::Function;
 pub use device::{Falcon, InputReport};
 pub use encode::{Step, StepKind};

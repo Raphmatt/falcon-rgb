@@ -199,3 +199,45 @@ fn simulator_actions_need_simulated_mode() {
     let done = done_results(&drain(&rx));
     assert!(done[0].1.is_err());
 }
+
+#[test]
+fn backup_then_restore_brings_every_layer_back() {
+    let (mut w, rx, _) = sim_worker();
+    drain(&rx);
+    let before: Vec<_> = (0..5).map(|p| *w.sim.lock().block(p)).collect();
+    w.handle(Command::Backup(Box::default()));
+    let ups = drain(&rx);
+    let backup = ups
+        .iter()
+        .find_map(|u| match u {
+            Update::BackupReady(b) => Some((**b).clone()),
+            _ => None,
+        })
+        .expect("backup update");
+    assert_eq!(done_results(&ups), vec![(Job::Backup, Ok(()))]);
+    assert_eq!(backup.layers.len(), 5);
+
+    let mut changed = Profile::default_for(0);
+    changed.lighting.color = Rgb::new(1, 2, 3);
+    changed.keys[0] = KeyAssignment::Key(0x04);
+    w.handle(Command::WriteProfiles(
+        (0..5).map(|p| (p, changed.clone())).collect(),
+    ));
+    w.handle(Command::SelectProfile(4));
+    drain(&rx);
+
+    w.handle(Command::Restore(Box::new(backup)));
+    let ups = drain(&rx);
+    assert_eq!(done_results(&ups), vec![(Job::Restore, Ok(()))]);
+    let restored = ups
+        .iter()
+        .filter(|u| matches!(u, Update::Restored(_)))
+        .count();
+    assert_eq!(restored, 5);
+    for (p, b) in before.iter().enumerate() {
+        assert_eq!(w.sim.lock().block(p), b, "layer {}", p + 1);
+    }
+    // The backup's active layer (1) is selected again.
+    assert_eq!(w.sim.lock().active_profile(), 0);
+    assert!(ups.iter().any(|u| matches!(u, Update::ActiveProfile(0))));
+}

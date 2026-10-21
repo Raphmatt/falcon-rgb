@@ -132,6 +132,27 @@ enum Cmd {
         #[arg(long, value_name = "FILE")]
         out: Option<PathBuf>,
     },
+    /// Back up the whole keypad to one JSON file: every layer's key map and lighting, plus the
+    /// macros the config knows for macro keys (macro contents cannot be read from the keypad).
+    Backup {
+        /// Output file [default: falcon-backup-YYYYMMDD-HHMMSS.json].
+        #[arg(long, value_name = "FILE")]
+        out: Option<PathBuf>,
+    },
+    /// Restore a backup (or an old `dump --out` .bin file): all its layers, or one with --layer.
+    Restore {
+        /// Backup .json, or a raw 264-byte dump .bin.
+        file: PathBuf,
+        /// Only this layer of the backup (1..=5).
+        #[arg(long, value_parser = profile_arg)]
+        layer: Option<usize>,
+        /// Write that layer to this keypad layer instead (needs --layer).
+        #[arg(long, value_parser = profile_arg, requires = "layer")]
+        to: Option<usize>,
+        /// Do not ask for confirmation.
+        #[arg(long)]
+        yes: bool,
+    },
     /// Set the lighting effect (lighting-only update; the keypad stores it in flash anyway).
     Effect {
         /// static, breathing, fade-in, fade-out, last-key, wave, random, custom (or 0..10).
@@ -283,6 +304,13 @@ fn main() -> Result<()> {
             ProfileCmd::Set { profile } => commands::profile_set(g, profile),
         },
         Cmd::Dump { profile, out } => commands::dump(g, profile, out.as_deref()),
+        Cmd::Backup { out } => commands::backup(g, out),
+        Cmd::Restore {
+            file,
+            layer,
+            to,
+            yes,
+        } => commands::restore(g, &file, layer, to, yes),
         Cmd::Effect {
             effect,
             color,
