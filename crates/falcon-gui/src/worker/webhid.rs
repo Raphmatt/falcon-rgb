@@ -15,7 +15,9 @@ use std::collections::VecDeque;
 use std::rc::Rc;
 use std::time::Duration;
 
-use falcon_core::protocol::{CONFIG_USAGE, CONFIG_USAGE_PAGE, LONG_LEN, PID, VID};
+use falcon_core::protocol::{
+    CONFIG_USAGE, CONFIG_USAGE_PAGE, LONG_LEN, PID, VENDOR_USAGE_PAGE_MIN, VID,
+};
 use falcon_core::{AsyncTransport, Error, Result};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::closure::Closure;
@@ -94,10 +96,16 @@ impl WebHid {
         if !device.opened() {
             device.open().await.map_err(|e| js_error("open", &e))?;
         }
+        let vendor = vendor_input_reports(&device);
         let events: Rc<RefCell<VecDeque<Vec<u8>>>> = Rc::default();
         let queue = events.clone();
         let on_input =
             Closure::<dyn FnMut(HidInputReportEvent)>::new(move |ev: HidInputReportEvent| {
+                // Chrome also delivers the consumer collection (media keys, report 3); the desktop
+                // transport reads vendor collections only, so do the same here.
+                if !vendor.is_empty() && !vendor.contains(&ev.report_id()) {
+                    return;
+                }
                 let data = ev.data();
                 let mut raw = Vec::with_capacity(data.byte_length() + 1);
                 raw.push(ev.report_id());
@@ -161,6 +169,20 @@ impl AsyncTransport for WebHid {
     fn try_event(&mut self) -> Result<Option<Vec<u8>>> {
         Ok(self.events.borrow_mut().pop_front())
     }
+}
+
+/// Input report IDs of the vendor collections (usage page `0xFF00`+): 4 (events) and 6.
+fn vendor_input_reports(device: &HidDevice) -> Vec<u8> {
+    let mut ids = Vec::new();
+    for c in device.collections().iter() {
+        if c.get_usage_page().unwrap_or(0) < VENDOR_USAGE_PAGE_MIN {
+            continue;
+        }
+        if let Some(reports) = c.get_input_reports() {
+            ids.extend(reports.iter().filter_map(|r| r.get_report_id()));
+        }
+    }
+    ids
 }
 
 /// `receiveFeatureReport` returns the report with its ID on macOS, without it elsewhere: keep a

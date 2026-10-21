@@ -29,7 +29,7 @@ wasm-bindgen-futures = "0.4.79"
 web-sys = { version = "0.3.106", features = [
     "Blob", "BlobPropertyBag", "console", "Document", "Element", "HtmlAnchorElement", "HtmlCanvasElement",
     "Hid", "HidCollectionInfo", "HidConnectionEvent", "HidDevice", "HidDeviceFilter",
-    "HidDeviceRequestOptions", "HidInputReportEvent", "Location", "Navigator", "Storage", "Url",
+    "HidDeviceRequestOptions", "HidInputReportEvent", "HidReportInfo", "Location", "Navigator", "Storage", "Url",
     "UrlSearchParams", "Window",
 ] }
 # std::time::Instant panics on wasm32; web-time re-exports std on native targets.

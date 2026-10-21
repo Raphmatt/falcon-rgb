@@ -239,6 +239,7 @@ Non-blocking reads on the vendor collections.
 | `04 02 0C d` | Wave direction changed to `d` (unverified: not observed; the official software only accepts 0..1) |
 | `04 01 07 s` | Brightness changed: brightness = s + 1, valid `s` 0..4 (unverified: not observed) |
 | `04 1F c 00 v 00 00 00 00` | Echo of feature command `c` with value `v` (hardware-confirmed: `04 1F 81 00 02` after `0x81` on layer 2, `04 1F 81 00 01` on layer 1, `04 1F 01 00 00` after `0x01`). For `0x81` and `0x82` the value is the **active** layer, not the one read (`0x82(3)` on layer 1 → `04 1F 82 00 01`); for `0x01` it is always 0. Seen identically through hidapi and Chrome WebHID on macOS. Informational; the official software ignores it |
+| `03 uu 00` (consumer collection `0C:01`) | A key mapped to a media function sends the consumer usage on press and `03 00` on release (hardware-confirmed: device byte `A7` Play/Pause → `03 CD`, `A8` Next → `03 B5`, `A6` Previous → `03 B6`). This is ordinary media-key input for the OS, not a configuration event; WebHID exposes it to pages, hidapi readers of the vendor collections never see it |
 | `01 00 00 00 00 00 00 00` | Report ID 1 from the mouse collection (e.g. when a key mapped to `E8` is pressed). Ignore |
 | `xx 02 19 5D 60 08 kk` | A host-function key was pressed (unverified: not observed yet). `kk` 0..19 = hw index; the host runs that key's function (launch program). Other `kk` values are device codes; after profile functions the official software re-reads `0x81` |
 
