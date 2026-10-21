@@ -101,7 +101,23 @@ falcon --simulate --dry-run -v remap 3 kp_7   # show the packets without hardwar
   only.
 - Back up your layers before experimenting: `falcon dump 1 --out p1.bin` (repeat for 2–5).
 
+## Disclaimer
+
+Use at your own risk. This is an unofficial hobby project, provided as is, with no guarantee
+that it works or is safe for your keypad. Every save writes to the keypad's flash memory. In my
+tests the worst that happened was the keypad not responding until it was replugged (8-byte
+reports on macOS, which the tool now blocks), and nothing was ever permanently broken. Still, a
+wrong or interrupted write could in the worst case leave a keypad unusable. You are responsible
+for your device and for anything that happens to it; I can't help with repairs or lost settings.
+
+## Use of AI
+
+This project was developed with AI assistance, using Anthropic's Claude Opus 5.5 in Claude
+Code: analysing how the official Windows software talks to the keypad, the Rust code (core
+library, CLI, desktop and browser app), the tests and the documentation.
+
+Testing on the keypad and all decisions were done by me.
+
 ## License
 
-[MIT](LICENSE) © 2026 Raphmatt. This software is provided "as is", without warranty of any kind;
-use it at your own risk.
+MIT, see [LICENSE](LICENSE). Copyright (c) 2026 Raphmatt.
