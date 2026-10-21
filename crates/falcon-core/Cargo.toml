@@ -1,0 +1,23 @@
+[package]
+name = "falcon-core"
+description = "Protocol, data model and HID transport for the MAX Falcon-20 RGB keypad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[features]
+default = ["hid"]
+# Real USB access via hidapi. Without it only the simulated device exists,
+# which keeps protocol unit tests free of native dependencies.
+hid = ["dep:hidapi"]
+
+[dependencies]
+dirs = { workspace = true }
+hidapi = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

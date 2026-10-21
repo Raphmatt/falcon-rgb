@@ -1,0 +1,16 @@
+# Project cargo config. Deliberately sets NO [build] rustflags: rustflags
+# sources replace each other instead of merging, so a `build.rustflags` here
+# would be silently ignored wherever a user config sets
+# `target.<triple>.rustflags` (e.g. for lld). Add flags per target instead.
+
+[env]
+# Minimum macOS for the binaries and any C code built by cc (hidapi).
+MACOSX_DEPLOYMENT_TARGET = "11.0"
+
+# Windows builds (native or cross from macOS via cargo-xwin): link the MSVC
+# C runtime statically so the exe runs without the VC++ Redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/IGNORE:4099"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/IGNORE:4099"]

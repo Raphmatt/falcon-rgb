@@ -1,0 +1,50 @@
+[workspace]
+resolver = "3"
+members = ["crates/falcon-core", "crates/falcon-cli", "crates/falcon-gui"]
+default-members = ["crates/falcon-core", "crates/falcon-cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Raphmatt/falcon-rgb"
+publish = false
+
+# Versions live here once; crates use `dep = { workspace = true }`.
+[workspace.dependencies]
+falcon-core = { path = "crates/falcon-core" }
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+dirs = "6.0.0"
+eframe = "0.37.0"
+# Shared (non-exclusive) open on macOS: the keypad must keep typing while the
+# app talks to it; hidapi opens devices exclusively there by default.
+hidapi = { version = "2.6.7", features = ["macos-shared-device"] }
+# Native file dialogs (GUI: launch-program path, layer import/export).
+rfd = "0.16.0"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+thiserror = "2.0.21"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+# Dev builds use Cargo's defaults. Optional speedups (sccache, lld,
+# line-tables-only debug info, deps at opt-level 1) belong in your own
+# ~/.cargo/config.toml; config profiles win over Cargo.toml profiles.
+
+# Everyday optimized build: thin LTO keeps link times short (fat LTO is
+# single-threaded and makes the link step slow).
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+
+# Shipping build (`just dist-*`): smallest binary, slow link is acceptable.
+[profile.dist]
+inherits = "release"
+lto = "fat"
+panic = "abort"

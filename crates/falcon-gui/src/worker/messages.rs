@@ -1,0 +1,89 @@
+//! Messages between the UI and the worker thread.
+
+use falcon_core::{FirmwareVersion, InputReport, Lighting, PacketRecord, Profile};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Hardware,
+    Simulated,
+}
+
+/// Device-side actions the simulator can fake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SimAction {
+    /// A layer key was pressed on the keypad (0-based profile).
+    PressLayer(usize),
+    /// A host-reporting key was pressed (k index).
+    PressHostKey(usize),
+    /// Queue one example of every input report.
+    DemoEvents,
+}
+
+#[derive(Debug, Clone)]
+pub enum Command {
+    SetMode(Mode),
+    /// Re-read firmware version and active profile.
+    Refresh,
+    SelectProfile(usize),
+    ApplyLighting {
+        profile: usize,
+        lighting: Box<Lighting>,
+    },
+    /// Full downloads (Windows "Save") of these profiles, in order.
+    WriteProfiles(Vec<(usize, Profile)>),
+    Simulate(SimAction),
+    Shutdown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Connection {
+    /// Hardware mode, no keypad found (yet).
+    Searching,
+    Connected {
+        simulated: bool,
+        firmware: Option<FirmwareVersion>,
+        /// HID path or "in-memory keypad".
+        detail: String,
+    },
+    /// A keypad is there but could not be opened.
+    Failed(String),
+    /// macOS refused the open: the app lacks Input Monitoring permission. Retried quietly.
+    PermissionDenied,
+}
+
+impl Connection {
+    pub fn is_connected(&self) -> bool {
+        matches!(self, Self::Connected { .. })
+    }
+}
+
+/// Which command a [`Update::Done`] belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Job {
+    Refresh,
+    SelectProfile(usize),
+    ApplyLighting(usize),
+    Write(Vec<usize>),
+    Simulate,
+}
+
+#[derive(Debug, Clone)]
+pub enum Update {
+    Connection(Connection),
+    /// The keypad's active profile (0-based): after our select, a layer key, or `0x81` at
+    /// connect and refresh (its 1-based reply is verified on hardware).
+    ActiveProfile(usize),
+    Event(InputReport),
+    Packets(Vec<PacketRecord>),
+    Progress {
+        done: usize,
+        total: usize,
+        what: String,
+    },
+    /// One profile of a [`Command::WriteProfiles`] reached the device.
+    Written(usize, Box<Profile>),
+    Done {
+        job: Job,
+        result: Result<(), String>,
+    },
+}

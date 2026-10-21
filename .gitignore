@@ -1,0 +1,7 @@
+/target/
+/dist/
+.DS_Store
+# Local configs and keypad dumps made while testing
+config*.json
+*.bin
+!/crates/falcon-core/tests/data/*.bin
