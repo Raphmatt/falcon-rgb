@@ -275,20 +275,24 @@ fn launch_editor(ui: &mut egui::Ui, app: &mut FalconApp, a: &mut KeyAssignment, 
         ui,
         "Runs on this computer: the keypad reports the key press and Falcon RGB opens the program. The app must be running.",
     );
+    if !crate::host::CAN_LAUNCH {
+        ui.label(
+            RichText::new("Only the desktop app can start programs; the browser version keeps the setting but ignores the key.")
+                .color(theme::WARN)
+                .small(),
+        );
+    }
     ui.horizontal(|ui| {
         ui.add(
             egui::TextEdit::singleline(path)
                 .hint_text("/Applications/Calculator.app or an app name")
                 .desired_width(250.0),
         );
-        if ui.button("Browse…").clicked() {
-            let mut dlg = rfd::FileDialog::new().set_title("Program to launch");
-            if cfg!(target_os = "macos") {
-                dlg = dlg.set_directory("/Applications");
-            }
-            if let Some(p) = dlg.pick_file() {
-                *path = p.display().to_string();
-            }
+        if crate::files::CAN_PICK_PROGRAMS
+            && ui.button("Browse…").clicked()
+            && let Some(p) = crate::files::pick_program("Program to launch")
+        {
+            *path = p;
         }
     });
     ui.horizontal(|ui| {

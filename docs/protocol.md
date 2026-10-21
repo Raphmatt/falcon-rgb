@@ -29,6 +29,17 @@ macOS notes:
   (`0xE0005000`), and afterwards the keypad answers no request at all (I/O timeout) until it is replugged. This rules out
   the 8-byte forms of `0x80`, polling rate and key mode on macOS.
 
+WebHID notes (Chrome on macOS, hardware-confirmed):
+
+- `navigator.hid.requestDevice` with the filter `{vendorId: 0x195D, productId: 0x6008, usagePage: 0xFF01, usage: 1}`
+  grants five collections: `01:02` (mouse, no reports exposed), `0C:01` (input 3), `FF00:FF00` (input 4, the events and
+  `04 1F` echoes), `FF00:01` (input 6) and `FF01:01` (feature 7). The keyboard collections are not exposed to pages.
+- `sendFeatureReport(7, data)` takes the 263 bytes after the report ID. `receiveFeatureReport(7)` returns all 264 bytes
+  **including** the report ID at `[0]`, the same layout as hidapi.
+- 264-byte `0x81`, `0x82` and `0x01` work exactly as with hidapi. No macOS permission prompt appeared in the test
+  (unverified whether Chrome already held Input Monitoring). The 8-byte rule above is assumed to apply too (same IOKit
+  path), so only 264-byte reports are sent.
+
 ## 2. Packet format
 
 ```
@@ -227,7 +238,7 @@ Non-blocking reads on the vendor collections.
 | `04 01 01 m` | Lighting effect changed on the device to `m`; valid range 0..9 (unverified: not observed, no on-keypad key found) |
 | `04 02 0C d` | Wave direction changed to `d` (unverified: not observed; the official software only accepts 0..1) |
 | `04 01 07 s` | Brightness changed: brightness = s + 1, valid `s` 0..4 (unverified: not observed) |
-| `04 1F c 00 v 00 00 00 00` | Echo of feature command `c` with value `v` (hardware-confirmed: `04 1F 81 00 02` after `0x81` on layer 2, `04 1F 81 00 01` on layer 1, `04 1F 01 00 00` after `0x01`). Informational; the official software ignores it |
+| `04 1F c 00 v 00 00 00 00` | Echo of feature command `c` with value `v` (hardware-confirmed: `04 1F 81 00 02` after `0x81` on layer 2, `04 1F 81 00 01` on layer 1, `04 1F 01 00 00` after `0x01`). For `0x81` and `0x82` the value is the **active** layer, not the one read (`0x82(3)` on layer 1 → `04 1F 82 00 01`); for `0x01` it is always 0. Seen identically through hidapi and Chrome WebHID on macOS. Informational; the official software ignores it |
 | `01 00 00 00 00 00 00 00` | Report ID 1 from the mouse collection (e.g. when a key mapped to `E8` is pressed). Ignore |
 | `xx 02 19 5D 60 08 kk` | A host-function key was pressed (unverified: not observed yet). `kk` 0..19 = hw index; the host runs that key's function (launch program). Other `kk` values are device codes; after profile functions the official software re-reads `0x81` |
 

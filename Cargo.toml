@@ -12,13 +12,28 @@ publish = false
 
 # Versions live here once; crates use `dep = { workspace = true }`.
 [workspace.dependencies]
-falcon-core = { path = "crates/falcon-core" }
+falcon-core = { path = "crates/falcon-core", default-features = false }
 anyhow = "1.0.104"
 clap = { version = "4.6.7", features = ["derive"] }
 dirs = "6.0.0"
 eframe = "0.37.0"
 # Shared (non-exclusive) open on macOS: the keypad must keep typing while the
 # app talks to it; hidapi opens devices exclusively there by default.
+pollster = "1.0.1"
+# Browser build only (falcon-gui on wasm32). WebHID bindings need
+# `--cfg=web_sys_unstable_apis`, set for the wasm target in .cargo/config.toml.
+futures-channel = "0.3.34"
+js-sys = "0.3.106"
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4.79"
+web-sys = { version = "0.3.106", features = [
+    "Blob", "BlobPropertyBag", "console", "Document", "Element", "HtmlAnchorElement", "HtmlCanvasElement",
+    "Hid", "HidCollectionInfo", "HidConnectionEvent", "HidDevice", "HidDeviceFilter",
+    "HidDeviceRequestOptions", "HidInputReportEvent", "Location", "Navigator", "Storage", "Url",
+    "UrlSearchParams", "Window",
+] }
+# std::time::Instant panics on wasm32; web-time re-exports std on native targets.
+web-time = "1.1.0"
 hidapi = { version = "2.6.7", features = ["macos-shared-device"] }
 # Native file dialogs (GUI: launch-program path, layer import/export).
 rfd = "0.16.0"

@@ -15,8 +15,10 @@
 //! - [`transport`]: the [`Transport`] trait, the [`SimulatedDevice`], the logging/dry-run
 //!   [`Recorder`] and (feature `hid`) the hidapi transport.
 //! - [`device`]: [`Falcon`], the high-level API that executes plans.
+//! - [`asynch`]: [`AsyncFalcon`], the same API over a non-blocking [`AsyncTransport`] (WebHID).
 //! - [`store`]: JSON persistence of the [`Config`].
 
+pub mod asynch;
 pub mod codes;
 pub mod descriptor;
 pub mod device;
@@ -29,6 +31,7 @@ pub mod protocol;
 pub mod store;
 pub mod transport;
 
+pub use asynch::{AsyncFalcon, AsyncRecorder, AsyncTransport};
 pub use codes::Function;
 pub use device::{Falcon, InputReport};
 pub use encode::{Step, StepKind};

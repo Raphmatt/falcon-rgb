@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Falcon WebHID test</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f6f6f4; --fg: #1c1c1a; --muted: #6b6b66; --card: #fff; --line: #ddd; --ok: #1f7a3a; --err: #b3261e; --acc: #c2410c; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #161615; --fg: #ececea; --muted: #9a9a94; --card: #21211f; --line: #3a3a37; --ok: #5cc27a; --err: #ff8a80; --acc: #fb923c; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 15px/1.45 system-ui, sans-serif; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+  h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 10px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--fg); cursor: pointer; margin: 0 6px 6px 0; }
+  button.primary { background: var(--acc); border-color: var(--acc); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  select { font: inherit; padding: 5px; border-radius: 7px; }
+  pre { font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; margin: 0; }
+  #log { max-height: 360px; overflow: auto; }
+  .ok { color: var(--ok); } .err { color: var(--err); } .muted { color: var(--muted); }
+  #swatches span { display: inline-block; width: 22px; height: 22px; border-radius: 5px; margin: 2px; border: 1px solid var(--line); vertical-align: middle; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Falcon-20 RGB WebHID test</h1>
+  <p class="sub">Checks whether the browser can reach the keypad's configuration interface. It only sends 264-byte
+    feature reports, reads layers and can switch the active layer. Nothing is written to the keypad's memory.</p>
+
+  <section>
+    <h2>1 · Connect</h2>
+    <div id="support"></div>
+    <button id="connect" class="primary">Connect keypad…</button>
+    <button id="disconnect" disabled>Disconnect</button>
+    <pre id="collections" class="muted"></pre>
+  </section>
+
+  <section>
+    <h2>2 · Read</h2>
+    <button id="getLayer" disabled>Which layer is active? (0x81)</button>
+    <select id="layer"><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option></select>
+    <button id="readBlock" disabled>Read layer block (0x82)</button>
+    <button id="selectLayer" disabled>Switch to this layer (0x01)</button>
+    <div id="summary"></div>
+    <div id="swatches"></div>
+  </section>
+
+  <section>
+    <h2>3 · Events</h2>
+    <p class="muted" style="margin:0">Press the layer keys on the keypad. Input reports show up in the log below.</p>
+  </section>
+
+  <section>
+    <h2>Log</h2>
+    <button id="clear">Clear</button>
+    <pre id="log"></pre>
+  </section>
+</main>
+<script>
+"use strict";
+const VID = 0x195D, PID = 0x6008, USAGE_PAGE = 0xFF01, USAGE = 0x0001;
+const REPORT_ID = 0x07, LEN = 264;          // never anything shorter: 8-byte reports hang the keypad on macOS
+const $ = (id) => document.getElementById(id);
+const hex = (bytes, n = bytes.length) => [...bytes.slice(0, n)].map((b) => b.toString(16).padStart(2, "0")).join(" ") + (bytes.length > n ? " …" : "");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let dev = null, busy = false;
+
+function log(msg, cls = "") {
+  const line = document.createElement("div");
+  line.className = cls;
+  line.textContent = `${new Date().toLocaleTimeString()}  ${msg}`;
+  $("log").append(line);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+function setConnected(on) {
+  for (const id of ["getLayer", "readBlock", "selectLayer", "disconnect"]) $(id).disabled = !on;
+  $("connect").disabled = on;
+}
+
+// Chrome returns feature reports with or without the report ID depending on platform; normalise to
+// the hidapi layout used everywhere else: reply[0] = 0x07.
+function normalise(view) {
+  const b = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
+  if (b.length === LEN && b[0] === REPORT_ID) return { reply: b, note: "ID included" };
+  const out = new Uint8Array(b.length + 1);
+  out[0] = REPORT_ID; out.set(b, 1);
+  return { reply: out, note: "ID not included, prepended" };
+}
+
+async function request(cmd, a0 = 0, a1 = 0, a2 = 0, waitMs = 20, get = true) {
+  if (busy) throw new Error("busy");
+  busy = true;
+  try {
+    const data = new Uint8Array(LEN - 1);    // without the report ID
+    data[0] = cmd; data[1] = a0; data[2] = a1; data[3] = a2;
+    log(`SET 07 ${hex(data, 8)}`);
+    await dev.sendFeatureReport(REPORT_ID, data);
+    if (!get) return null;
+    await sleep(waitMs);
+    const { reply, note } = normalise(await dev.receiveFeatureReport(REPORT_ID));
+    log(`GET ${hex(reply, 16)}  (${reply.length} bytes, ${note})`);
+    return reply;
+  } finally { busy = false; }
+}
+
+async function connect() {
+  try {
+    const picked = await navigator.hid.requestDevice({ filters: [{ vendorId: VID, productId: PID, usagePage: USAGE_PAGE, usage: USAGE }] });
+    if (!picked.length) { log("No device picked."); return; }
+    await open(picked[0]);
+  } catch (e) { log(`Connect failed: ${e.name}: ${e.message}`, "err"); }
+}
+
+async function open(d) {
+  dev = d;
+  if (!dev.opened) await dev.open();
+  $("collections").textContent = dev.collections.map((c) =>
+    `collection usagePage 0x${c.usagePage.toString(16)} usage 0x${c.usage.toString(16)}  ` +
+    `feature IDs [${c.featureReports.map((r) => r.reportId)}]  input IDs [${c.inputReports.map((r) => r.reportId)}]`).join("\n");
+  dev.addEventListener("inputreport", (e) => {
+    const b = new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength);
+    log(`IN  ${e.reportId.toString(16).padStart(2, "0")} ${hex(b, 12)}${describeEvent(e.reportId, b)}`, "ok");
+  });
+  log(`Opened "${dev.productName}" (${dev.collections.length} collection(s) granted).`, "ok");
+  setConnected(true);
+}
+
+function describeEvent(id, b) {
+  if (id === 0x04 && b[0] === 0x01 && b[1] === 0x00) return `  → layer ${b[2]}`;
+  if (id === 0x04 && b[0] === 0x1F) return `  → ack of 0x${b[1].toString(16)} (${b[3]})`;
+  return "";
+}
+
+async function getLayer() {
+  try {
+    const r = await request(0x81);
+    const ok = r[1] === 0x81 && r[2] >= 1 && r[2] <= 5;
+    $("summary").innerHTML = ok ? `<p class="ok">Active layer: <b>${r[2]}</b></p>` : `<p class="err">Unexpected reply: ${hex(r, 8)}</p>`;
+    if (ok) $("layer").value = String(r[2]);
+  } catch (e) { log(`0x81 failed: ${e.name}: ${e.message}`, "err"); }
+}
+
+async function readBlock() {
+  const p = Number($("layer").value);
+  try {
+    const r = await request(0x82, p, 0, 0, 200);
+    if (r[0] !== 0x07 || r[1] !== 0x82 || r[2] !== p) { $("summary").innerHTML = `<p class="err">Misaligned reply: ${hex(r, 8)}</p>`; return; }
+    const b = r.slice(8, 208);
+    const effect = { 0: "static", 5: "wave", 7: "custom" }[b[125]] ?? `effect ${b[125]}`;
+    const brightness = b[126] === 0 ? "off" : `level ${b[126]}`;
+    $("summary").innerHTML = `<p class="ok">Layer ${p}: ${effect}, brightness ${brightness}, colour #${hex([b[128], b[129], b[130]]).replaceAll(" ", "")}, ` +
+      `key map ${hex(b, 5)} …</p><pre class="muted">${hex(b, 200)}</pre>`;
+    $("swatches").innerHTML = Array.from({ length: 25 }, (_, i) => `<span title="LED ${i}" style="background:rgb(${b[50 + i]},${b[75 + i]},${b[100 + i]})"></span>`).join("");
+  } catch (e) { log(`0x82 failed: ${e.name}: ${e.message}`, "err"); }
+}
+
+async function selectLayer() {
+  const p = Number($("layer").value);
+  try { await request(0x01, p, 0, 0, 20, false); log(`Selected layer ${p}.`); }
+  catch (e) { log(`0x01 failed: ${e.name}: ${e.message}`, "err"); }
+}
+
+async function disconnect() {
+  if (dev) { await dev.close(); log("Closed."); }
+  dev = null; setConnected(false);
+}
+
+if (!("hid" in navigator)) {
+  $("support").innerHTML = `<p class="err">This browser has no WebHID. Use Chrome, Edge, Brave or Opera on desktop${window.isSecureContext ? "" : " (and open the page via http://localhost, not as a file)"}.</p>`;
+  $("connect").disabled = true;
+} else {
+  $("support").innerHTML = `<p class="ok">WebHID available.</p>`;
+  navigator.hid.getDevices().then((ds) => { const d = ds.find((x) => x.vendorId === VID); if (d) { log("Reconnecting to a previously allowed keypad."); open(d).catch((e) => log(`${e.name}: ${e.message}`, "err")); } });
+  navigator.hid.addEventListener("disconnect", (e) => { if (e.device === dev) { log("Keypad unplugged.", "err"); dev = null; setConnected(false); } });
+}
+$("connect").onclick = connect;
+$("disconnect").onclick = disconnect;
+$("getLayer").onclick = getLayer;
+$("readBlock").onclick = readBlock;
+$("selectLayer").onclick = selectLayer;
+$("clear").onclick = () => { $("log").textContent = ""; };
+</script>
+</body>
+</html>

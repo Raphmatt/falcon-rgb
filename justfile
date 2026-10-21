@@ -12,9 +12,10 @@ default:
 build:
     cargo build --workspace
 
-# Fast type check without codegen — the quickest edit loop
+# Fast type check without codegen — the quickest edit loop (desktop + browser build)
 check:
     cargo check --workspace --all-targets
+    PATH="$HOME/.cargo/bin:$PATH" cargo check -p falcon-gui --target wasm32-unknown-unknown
 
 # Start the desktop app (debug), e.g. `just gui --simulate`
 gui *args:
@@ -32,6 +33,7 @@ test:
 lint:
     cargo fmt --all --check
     cargo clippy --workspace --all-targets -- -D warnings
+    PATH="$HOME/.cargo/bin:$PATH" cargo clippy -p falcon-gui --target wasm32-unknown-unknown -- -D warnings
 
 # Format all code
 fmt:
@@ -49,6 +51,17 @@ release:
 bundle:
     cargo build -p falcon-gui -p falcon-cli --profile dist
     scripts/bundle-mac.sh "{{app_name}}" target/dist
+
+# One-time setup: rustup target add wasm32-unknown-unknown; brew install trunk (or cargo install
+# --locked trunk). rustup's toolchain is used because Homebrew's rustc has no wasm std.
+
+# Browser app on http://127.0.0.1:8080 (rebuilds on save); `?simulate` for the simulated keypad
+web:
+    PATH="$HOME/.cargo/bin:$PATH" trunk serve --config crates/falcon-gui/Trunk.toml
+
+# Optimized browser build → dist/web/ (static files, host anywhere with HTTPS)
+web-build:
+    PATH="$HOME/.cargo/bin:$PATH" trunk build --release --config crates/falcon-gui/Trunk.toml
 
 # One-time setup: rustup target add x86_64-pc-windows-msvc; cargo install --locked cargo-xwin;
 # brew install llvm. Uses rustup's toolchain (Homebrew's rustc has no Windows std).

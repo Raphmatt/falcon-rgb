@@ -6,9 +6,9 @@ use falcon_core::protocol::PROFILE_COUNT;
 
 use super::{heading, hint};
 use crate::app::FalconApp;
-use crate::autoswitch;
 use crate::theme;
 use crate::worker::{Mode, SimAction};
+use crate::{autoswitch, files};
 
 pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
     let p = app.active();
@@ -36,7 +36,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
             export_layer(app);
         }
         if ui.button("Import layer…").clicked() {
-            import_layer(app);
+            import_layer(ui, app);
         }
     });
 
@@ -109,16 +109,11 @@ fn linked_apps(ui: &mut egui::Ui, app: &mut FalconApp) {
             app.profile_mut().linked_apps.push(entry);
             app.new_linked_app.clear();
         }
-        if ui.button("Browse…").clicked() {
-            let mut dlg = rfd::FileDialog::new().set_title("App that selects this layer");
-            if cfg!(target_os = "macos") {
-                dlg = dlg.set_directory("/Applications");
-            }
-            if let Some(path) = dlg.pick_file() {
-                app.profile_mut()
-                    .linked_apps
-                    .push(path.display().to_string());
-            }
+        if files::CAN_PICK_PROGRAMS
+            && ui.button("Browse…").clicked()
+            && let Some(path) = files::pick_program("App that selects this layer")
+        {
+            app.profile_mut().linked_apps.push(path);
         }
     });
     if let Some(front) = &app.front_app {
@@ -131,42 +126,42 @@ fn linked_apps(ui: &mut egui::Ui, app: &mut FalconApp) {
 
 fn export_layer(app: &mut FalconApp) {
     let profile = app.profile().clone();
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Export layer")
-        .set_file_name(format!("{}.falcon-layer.json", profile.name))
-        .add_filter("Falcon layer", &["json"])
-        .save_file()
-    else {
-        return;
-    };
     let result = serde_json::to_string_pretty(&profile)
         .map_err(|e| e.to_string())
-        .and_then(|json| std::fs::write(&path, json).map_err(|e| e.to_string()));
+        .and_then(|json| {
+            let name = format!("{}.falcon-layer.json", profile.name);
+            files::save_text("Export layer", &name, &json)
+        });
     match result {
-        Ok(()) => app.info(format!("Layer exported to {}", path.display())),
+        Ok(Some(place)) => app.info(format!("Layer exported to {place}")),
+        Ok(None) => {}
         Err(e) => app.error(format!("Export failed: {e}")),
     }
 }
 
-fn import_layer(app: &mut FalconApp) {
-    let Some(path) = rfd::FileDialog::new()
-        .set_title("Import layer")
-        .add_filter("Falcon layer", &["json"])
-        .pick_file()
-    else {
+/// Opens the picker; [`finish_import`] applies the file once it arrives.
+fn import_layer(ui: &egui::Ui, app: &mut FalconApp) {
+    let ctx = ui.ctx().clone();
+    app.import_inbox
+        .open_text("Import layer", move || ctx.request_repaint());
+}
+
+/// Applies a picked layer file to the active layer (called every frame by the app).
+pub fn finish_import(app: &mut FalconApp) {
+    let Some(picked) = app.import_inbox.take() else {
         return;
     };
-    let result = std::fs::read_to_string(&path)
-        .map_err(|e| e.to_string())
-        .and_then(|s| serde_json::from_str::<Profile>(&s).map_err(|e| e.to_string()))
-        .and_then(|p| p.validate().map(|()| p).map_err(|e| e.to_string()));
+    let result = picked.and_then(|(name, s)| {
+        let p = serde_json::from_str::<Profile>(&s).map_err(|e| e.to_string())?;
+        p.validate().map_err(|e| e.to_string())?;
+        Ok((name, p))
+    });
     match result {
-        Ok(profile) => {
+        Ok((name, profile)) => {
             *app.profile_mut() = profile;
             app.lighting_edited();
             app.info(format!(
-                "Imported {} into layer {} (not saved yet)",
-                path.display(),
+                "Imported {name} into layer {} (not saved yet)",
                 app.active() + 1
             ));
         }

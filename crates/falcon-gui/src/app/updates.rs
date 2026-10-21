@@ -77,6 +77,15 @@ impl FalconApp {
                     }
                     Connection::Failed(e) => self.error(format!("Keypad: {e}")),
                     Connection::PermissionDenied => self.error(PERMISSION_TEXT),
+                    Connection::NeedsPairing if self.conn.is_connected() => {
+                        self.info("Keypad disconnected")
+                    }
+                    Connection::NeedsPairing => {
+                        self.info("Click “Connect keypad…” in the status bar and pick the Falcon-20 RGB")
+                    }
+                    Connection::Unsupported => self.error(
+                        "This browser has no WebHID: use Chrome, Edge, Brave or Opera on desktop, or the simulated keypad",
+                    ),
                     Connection::Searching => {}
                 }
                 if !c.is_connected() {
@@ -100,6 +109,7 @@ impl FalconApp {
             }
             Update::Progress { done, total, what } => self.progress = Some((done, total, what)),
             Update::Written(p, profile) => self.mark_written(p, *profile),
+            Update::KeypadLighting(p, lighting) => self.adopt_keypad_lighting(p, *lighting),
             Update::Done { job, result } => {
                 self.busy = self.busy.saturating_sub(1);
                 if matches!(job, Job::ApplyLighting(_)) {

@@ -1,10 +1,11 @@
 //! User actions that talk to the worker or change the configuration as a whole.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use eframe::egui;
 use falcon_core::protocol::{MAX_MACRO_EVENTS, PROFILE_COUNT};
-use falcon_core::{KeyAssignment, Macro, MacroEvent, Profile, store};
+use falcon_core::{KeyAssignment, Lighting, Macro, MacroEvent, Profile};
+use web_time::Instant;
 
 use super::{APPLY_DEBOUNCE, FalconApp, Recording, initial_device_snapshot};
 use crate::keymap;
@@ -49,6 +50,11 @@ impl FalconApp {
 
     pub fn refresh(&mut self) {
         self.send_job(Command::Refresh);
+    }
+
+    /// Browser: let the user pick the keypad (WebHID chooser).
+    pub fn pair(&mut self) {
+        self.send_job(Command::Pair);
     }
 
     pub fn simulate(&mut self, action: SimAction) {
@@ -116,6 +122,18 @@ impl FalconApp {
         }
     }
 
+    /// The keypad's stored lighting for layer `p` replaces the configured one (the keypad is
+    /// what the user sees). Values the model cannot hold (unknown effect bytes) are ignored.
+    pub(super) fn adopt_keypad_lighting(&mut self, p: usize, lighting: Lighting) {
+        if p >= PROFILE_COUNT || lighting.validate().is_err() {
+            return;
+        }
+        if self.config.profiles[p].lighting != lighting {
+            self.config.profiles[p].lighting = lighting.clone();
+        }
+        self.device_snapshot[p].lighting = lighting;
+    }
+
     pub(super) fn mark_written(&mut self, p: usize, profile: Profile) {
         if p < PROFILE_COUNT {
             self.device_snapshot[p] = profile;
@@ -129,12 +147,13 @@ impl FalconApp {
             self.error(format!("Not saved: {e}"));
             return;
         }
-        if let Some(path) = self.config_path.clone() {
-            if let Err(e) = store::save_config(&path, &self.config) {
-                self.error(format!("Could not write {}: {e}", path.display()));
+        match self.config_store.save(&self.config) {
+            Ok(true) => self.file_snapshot = self.config.clone(),
+            Ok(false) => {}
+            Err(e) => {
+                self.error(format!("Not saved: {e}"));
                 return;
             }
-            self.file_snapshot = self.config.clone();
         }
         if !self.connected() {
             self.info("Saved to file. Keypad not connected; save again once it is.");

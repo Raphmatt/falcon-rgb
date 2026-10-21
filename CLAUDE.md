@@ -15,7 +15,26 @@ keypad, USB `195D:6008`). Target: macOS first, portable to Windows/Linux via hid
 - `crates/falcon-core` — protocol (packet encoding), data model, transport trait, hidapi transport (feature `hid`),
   simulated device. No UI code.
 - `crates/falcon-cli` — `falcon` binary: list/query devices, apply settings, `--dry-run` hex dumps.
-- `crates/falcon-gui` — egui/eframe desktop app.
+- `crates/falcon-gui` — egui/eframe app; the same crate builds for the desktop and for the browser
+  (`wasm32-unknown-unknown`, trunk, WebHID). `web/spike/` is a plain-JS WebHID test page for protocol debugging.
+
+## Browser build (WebHID)
+
+- `just web` (trunk serve, http://127.0.0.1:8080, `?simulate`), `just web-build` → `dist/web/`; CI deploy in
+  `.github/workflows/pages.yml`. Needs rustup's toolchain (`PATH=$HOME/.cargo/bin:$PATH`; Homebrew rustc has no wasm
+  std) and `trunk`. `just check`/`just lint` also check the wasm target.
+- `falcon-core` stays sync-first; `asynch.rs` adds `AsyncTransport` + `AsyncFalcon` (+ `AsyncRecorder`) that run the
+  same `encode` plans. A test asserts byte-identical packet logs against the sync `Falcon`. The workspace dep has
+  `default-features = false`; the CLI and native GUI enable `hid`.
+- GUI split by `cfg(target_arch = "wasm32")`: `worker/native.rs` (thread, hidapi) vs `worker/web.rs` (one
+  `spawn_local` task: std mpsc polled every 15 ms, `Dev::Sim` sync simulator or `Dev::Hid` = `AsyncFalcon<WebHid>`),
+  `worker/webhid.rs` (web-sys HID, needs `--cfg=web_sys_unstable_apis` from `.cargo/config.toml`). Pairing:
+  `Command::Pair` → `requestDevice` (Chrome's transient user activation still holds when the task runs);
+  `Connection::NeedsPairing`/`Unsupported` are web-only states. Hot-plug: `navigator.hid` connect/disconnect + 2 s
+  `getDevices` re-scan.
+- Other web gates: config in `localStorage` (`app/persist.rs`, keys `falcon-rgb/config` and `…/config.sim`), file
+  dialogs via `files.rs` (download link / async picker into an `Inbox`), `web-time` instead of `std::time::Instant`
+  (panics on wasm), no launch keys (`host::CAN_LAUNCH`), no auto layer switch, no Input Monitoring banner.
 
 ## Build
 
@@ -102,7 +121,8 @@ GUI (`just gui --simulate` or `target/debug/falcon-gui [--simulate] [--config FI
   "Apply to keypad"/Auto-apply (1000 ms debounce, one in flight, skipped when the keypad already holds the value —
   each write costs flash) = `apply_lighting` (no `0x06`, still persistent).
   Orange dot on a layer = keys/lighting differ from what the keypad is believed to hold (sim boots factory defaults;
-  hardware is assumed to match the file at start).
+  hardware: keys are assumed to match the file, lighting is read from the keypad — `0x82` ×5 at connect and Refresh,
+  `Update::KeypadLighting` replaces the configured lighting; macros cannot be read back, so keys are not).
 - The edited layer follows the keypad: `0x81` at connect and Refresh, our own selects and `ProfileChanged` events.
   `HostCode` events trigger a refresh. `HostKey` runs the key's `LaunchProgram` (macOS `open`/`open -a`).
   `CommandAck`/`MouseReport` only show in the packet log. Firmware shows "n/a" (the 264-byte `0x80` is not implemented).

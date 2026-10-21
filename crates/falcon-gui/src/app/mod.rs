@@ -2,24 +2,30 @@
 //! panels are in [`crate::views`].
 
 mod actions;
+mod persist;
 mod updates;
 
 use std::collections::VecDeque;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use eframe::egui;
 use falcon_core::protocol::PROFILE_COUNT;
-use falcon_core::{Config, Lighting, Profile, Rgb, store};
+use falcon_core::{Config, Lighting, Profile, Rgb};
+use web_time::Instant;
+
+pub use persist::ConfigStore;
 
 use crate::autoswitch::{self, FrontApp};
 use crate::worker::{Connection, Mode, WorkerHandle};
 use crate::{preview, theme, views};
 
-/// Command-line options.
+/// Command-line options (in the browser: the URL query, `?simulate`).
 #[derive(Debug, Clone, Default)]
 pub struct Args {
     pub simulate: bool,
+    #[cfg(not(target_arch = "wasm32"))]
     pub config: Option<PathBuf>,
 }
 
@@ -79,7 +85,7 @@ pub struct FalconApp {
     file_snapshot: Config,
     /// What the keypad is believed to hold per layer (keys + lighting).
     device_snapshot: [Profile; PROFILE_COUNT],
-    pub config_path: Option<PathBuf>,
+    pub config_store: ConfigStore,
     worker: WorkerHandle,
     pub mode: Mode,
     pub conn: Connection,
@@ -106,6 +112,8 @@ pub struct FalconApp {
     pub confirm_reset: bool,
     pub new_linked_app: String,
     pub front_app: Option<FrontApp>,
+    /// Layer file picked for import, possibly arriving frames after the dialog (browser).
+    pub import_inbox: crate::files::Inbox,
     watcher: autoswitch::Watcher,
     started: Instant,
 }
@@ -118,18 +126,13 @@ impl FalconApp {
         } else {
             Mode::Hardware
         };
-        let config_path = args.config.or_else(|| {
-            let p = store::default_config_path()?;
-            Some(if args.simulate {
-                p.with_file_name("config.sim.json")
-            } else {
-                p
-            })
-        });
-        let (config, load_error) = match config_path.as_deref().map(store::load_config) {
-            Some(Ok(c)) => (c, None),
-            Some(Err(e)) => (Config::default(), Some(e.to_string())),
-            None => (Config::default(), None),
+        #[cfg(not(target_arch = "wasm32"))]
+        let config_store = ConfigStore::default_for(args.simulate, args.config);
+        #[cfg(target_arch = "wasm32")]
+        let config_store = ConfigStore::default_for(args.simulate);
+        let (config, load_error) = match config_store.load() {
+            Ok(c) => (c, None),
+            Err(e) => (Config::default(), Some(e)),
         };
         let ctx = cc.egui_ctx.clone();
         let worker = WorkerHandle::spawn(mode, move || ctx.request_repaint());
@@ -139,7 +142,7 @@ impl FalconApp {
             device_snapshot: initial_device_snapshot(mode, &config),
             file_snapshot: config.clone(),
             config,
-            config_path,
+            config_store,
             worker,
             mode,
             conn: Connection::Searching,
@@ -161,19 +164,15 @@ impl FalconApp {
             confirm_reset: false,
             new_linked_app: String::new(),
             front_app: None,
+            import_inbox: Default::default(),
             watcher,
             started: Instant::now(),
         };
         match load_error {
             Some(e) => app.error(format!(
-                "Could not read the config file ({e}); using defaults. Saving overwrites it."
+                "Could not read the saved config ({e}); using defaults. Saving overwrites it."
             )),
-            None => app.info(format!(
-                "Config: {}",
-                app.config_path
-                    .as_deref()
-                    .map_or("(not saved)".into(), |p| p.display().to_string())
-            )),
+            None => app.info(format!("Config: {}", app.config_store.describe())),
         }
         app
     }
@@ -259,6 +258,7 @@ impl eframe::App for FalconApp {
         self.process_updates();
         self.watcher.set_enabled(self.config.settings.auto_switch);
         self.process_front_apps();
+        views::layer::finish_import(self);
         if let Some(wait) = self.auto_apply_tick() {
             ctx.request_repaint_after(wait);
         }

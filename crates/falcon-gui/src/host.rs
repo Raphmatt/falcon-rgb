@@ -48,10 +48,19 @@ fn is_executable(p: &Path) -> bool {
     p.is_file()
 }
 
+/// Whether [`launch`] can work here (a web page cannot start programs).
+pub const CAN_LAUNCH: bool = !cfg!(target_arch = "wasm32");
+
 /// Starts `target` detached from the app's stdio.
 pub fn launch(target: &str) -> std::io::Result<()> {
     if target.trim().is_empty() {
         return Err(std::io::Error::other("empty launch path"));
+    }
+    if !CAN_LAUNCH {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "programs cannot be started from the browser",
+        ));
     }
     let (program, args) = launch_command(target);
     Command::new(program)
@@ -67,6 +76,7 @@ pub fn launch(target: &str) -> std::io::Result<()> {
 }
 
 /// Opens System Settings → Privacy & Security → Input Monitoring (macOS).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn open_input_monitoring_settings() -> std::io::Result<()> {
     Command::new("open")
         .arg(falcon_core::transport::hid::INPUT_MONITORING_SETTINGS_URL)

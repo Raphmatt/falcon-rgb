@@ -32,6 +32,8 @@ pub enum Command {
     /// Full downloads (Windows "Save") of these profiles, in order.
     WriteProfiles(Vec<(usize, Profile)>),
     Simulate(SimAction),
+    /// Browser: show the WebHID device chooser (must follow a click). Ignored natively.
+    Pair,
     Shutdown,
 }
 
@@ -49,6 +51,11 @@ pub enum Connection {
     Failed(String),
     /// macOS refused the open: the app lacks Input Monitoring permission. Retried quietly.
     PermissionDenied,
+    /// Browser: no keypad allowed for this site yet; the user has to pick it once.
+    NeedsPairing,
+    /// Browser without WebHID (Safari, Firefox, or not a secure context).
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    Unsupported,
 }
 
 impl Connection {
@@ -65,6 +72,7 @@ pub enum Job {
     ApplyLighting(usize),
     Write(Vec<usize>),
     Simulate,
+    Pair,
 }
 
 #[derive(Debug, Clone)]
@@ -82,6 +90,8 @@ pub enum Update {
     },
     /// One profile of a [`Command::WriteProfiles`] reached the device.
     Written(usize, Box<Profile>),
+    /// Lighting of a layer as stored on the real keypad (`0x82` at connect and refresh).
+    KeypadLighting(usize, Box<Lighting>),
     Done {
         job: Job,
         result: Result<(), String>,

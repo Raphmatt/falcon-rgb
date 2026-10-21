@@ -3,8 +3,8 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::{FalconApp, PERMISSION_TEXT};
+use crate::theme;
 use crate::worker::{Connection, Mode};
-use crate::{host, theme};
 
 pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
     ui.add_space(3.0);
@@ -28,12 +28,34 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
                 "No permission to open the keypad".to_owned(),
                 PERMISSION_TEXT.to_owned(),
             ),
+            Connection::NeedsPairing => (
+                theme::WARN,
+                "Keypad not connected to this page".to_owned(),
+                "The browser only lets the page use a keypad you picked once".to_owned(),
+            ),
+            Connection::Unsupported => (
+                theme::ERR,
+                "This browser cannot talk to USB devices".to_owned(),
+                "WebHID is only available in Chrome, Edge, Brave and Opera on desktop. The simulated keypad still works.".to_owned(),
+            ),
         };
         let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
         ui.painter().circle_filled(rect.center(), 4.5, dot);
         let resp = ui.label(text);
         if !tip.is_empty() {
             resp.on_hover_text(tip);
+        }
+        let can_pair = app.conn == Connection::NeedsPairing
+            || (cfg!(target_arch = "wasm32")
+                && app.mode == Mode::Hardware
+                && matches!(app.conn, Connection::Searching | Connection::Failed(_)));
+        if can_pair
+            && ui
+                .button("Connect keypad…")
+                .on_hover_text("Pick the Falcon-20 RGB in the browser's device list")
+                .clicked()
+        {
+            app.pair();
         }
         if let Connection::Connected { firmware, .. } = &app.conn {
             ui.separator();
@@ -93,14 +115,16 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
     ui.add_space(2.0);
 }
 
-/// Banner under the toolbar while macOS denies access to the keypad.
+/// Banner under the toolbar while macOS denies access to the keypad (never in the browser).
+#[cfg_attr(target_arch = "wasm32", allow(unused_variables))]
 pub fn permission_banner(ui: &mut egui::Ui, app: &mut FalconApp) {
     ui.add_space(4.0);
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(PERMISSION_TEXT).color(theme::ERR));
+        #[cfg(not(target_arch = "wasm32"))]
         if cfg!(target_os = "macos")
             && ui.button("Open Input Monitoring settings").clicked()
-            && let Err(e) = host::open_input_monitoring_settings()
+            && let Err(e) = crate::host::open_input_monitoring_settings()
         {
             app.error(format!("Cannot open System Settings: {e}"));
         }

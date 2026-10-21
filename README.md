@@ -2,7 +2,8 @@
 
 An unofficial, open-source configuration tool for the **MAX Falcon-20 RGB** macro keypad
 (USB `195D:6008`), written in Rust. The keypad only ships with Windows software; this project
-runs on macOS first and should work on Windows and Linux through hidapi and egui.
+runs on macOS first and should work on Windows and Linux through hidapi and egui. The same app
+also runs **in the browser** (WebAssembly + WebHID), with nothing to install.
 
 > **Not affiliated with, endorsed by or supported by the keypad's manufacturer.** "MAX",
 > "Falcon" and all other product names are trademarks of their respective owners and are used
@@ -30,6 +31,24 @@ events are confirmed. Polling rate, key mode and effects 8–10 are still untest
 confirmed on hardware are marked `[HW-VERIFY]` in the code. `falcon doctor` prints the current
 list. See [docs/protocol.md](docs/protocol.md) for the protocol description.
 
+## In the browser
+
+The desktop app compiles to WebAssembly and talks to the keypad through
+[WebHID](https://developer.mozilla.org/en-US/docs/Web/API/WebHID_API):
+
+- Works in Chrome, Edge, Brave and Opera on desktop. Safari and Firefox have no WebHID, but the
+  simulated keypad (`?simulate`) still works there.
+- Click **Connect keypad…** in the status bar and pick the keypad once. The browser remembers
+  the choice for that site.
+- The configuration is stored in the browser (local storage). Use *Export layer* / *Import
+  layer* to move layers between the browser and the desktop app.
+- Not available in the browser: launch-program keys (a web page cannot start programs) and
+  automatic layer switching by frontmost app.
+
+Run it locally with `just web` (http://127.0.0.1:8080). `just web-build` writes static files
+to `dist/web/`. The included GitHub Actions workflow (`.github/workflows/pages.yml`) publishes
+them on GitHub Pages; enable *Settings → Pages → Source: GitHub Actions* once.
+
 ## Building
 
 Requires a recent stable Rust toolchain (edition 2024) and optionally
@@ -42,6 +61,7 @@ just gui --simulate        # desktop app against a simulated keypad
 just cli list              # command-line tool
 just test
 just bundle                # macOS: dist/Falcon RGB.app (ad-hoc signed)
+just web                   # browser version (needs: rustup target add wasm32-unknown-unknown, trunk)
 ```
 
 Run `just` to list all recipes.

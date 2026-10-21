@@ -48,6 +48,7 @@ pub fn match_profile(profiles: &[Profile], app: &FrontApp) -> Option<usize> {
 }
 
 /// Parses `lsappinfo info -only name -only bundlepath` output (`"Key"="Value"` lines).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn parse_lsappinfo(text: &str) -> Option<FrontApp> {
     let mut app = FrontApp::default();
     for line in text.lines() {
@@ -94,6 +95,10 @@ impl Watcher {
     pub fn spawn(notify: impl Fn() + Send + 'static) -> Self {
         let enabled = Arc::new(AtomicBool::new(false));
         let (tx, rx) = mpsc::channel();
+        if !SUPPORTED {
+            // Nothing to watch (and no threads in the browser): `tx` is dropped, `rx` stays empty.
+            return Self { enabled, rx };
+        }
         let flag = enabled.clone();
         std::thread::Builder::new()
             .name("falcon-autoswitch".into())
