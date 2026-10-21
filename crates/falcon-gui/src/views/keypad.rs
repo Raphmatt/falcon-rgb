@@ -1,7 +1,9 @@
 //! The drawn keypad: 4 × 5 keys and 4 light bars at their real relative positions
 //! (`analysis/key-layout.json`), lit with the lighting preview.
 
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, vec2};
+use eframe::egui::{
+    self, Align2, Color32, CursorIcon, FontId, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, vec2,
+};
 use falcon_core::layout::{BAR_COUNT, COLS, KEY_COUNT, KEY_LEGENDS, LightBar};
 use falcon_core::{Effect, KeyAssignment, Rgb, codes};
 
@@ -24,6 +26,34 @@ pub struct Geometry {
     pub keys: [Rect; KEY_COUNT],
     pub bars: [Rect; BAR_COUNT],
     pub scale: f32,
+}
+
+impl Geometry {
+    /// The key or light bar under `p` (bars get a few points of slack, they are thin).
+    pub fn target_at(&self, p: Pos2) -> Option<Target> {
+        if let Some(k) = self.keys.iter().position(|r| r.contains(p)) {
+            return Some(Target::Key(k));
+        }
+        self.bars
+            .iter()
+            .position(|r| r.expand(4.0 * self.scale).contains(p))
+            .map(Target::Bar)
+    }
+
+    /// Every target touched by a pointer moving from `a` to `b`, in order, without repeats.
+    /// Sampled every couple of points so a fast drag skips nothing between two frames.
+    pub fn targets_along(&self, a: Pos2, b: Pos2) -> Vec<Target> {
+        let steps = ((b - a).length() / 2.0).ceil().max(1.0) as usize;
+        let mut out: Vec<Target> = Vec::new();
+        for i in 0..=steps {
+            if let Some(t) = self.target_at(a.lerp(b, i as f32 / steps as f32))
+                && out.last() != Some(&t)
+            {
+                out.push(t);
+            }
+        }
+        out
+    }
 }
 
 /// Fits the keypad into `avail`, centred.
@@ -162,9 +192,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
         StrokeKind::Inside,
     );
 
-    let primary_down = ui.input(|i| i.pointer.primary_down());
     let mut clicked: Option<Target> = None;
-    let mut painted: Option<Target> = None;
 
     for (b, rect) in g.bars.iter().enumerate() {
         let c = frame.bars[b];
@@ -175,13 +203,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
             theme::color(c)
         };
         painter.rect_filled(*rect, 3.0 * s, fill);
-        let resp = ui
-            .interact(
-                rect.expand(4.0 * s),
-                ui.scope_id().with(("bar", b)),
-                Sense::click(),
-            )
-            .on_hover_text(format!("Light bar {}", LightBar::ALL[b].short_name()));
+        let mut resp = ui.interact(
+            rect.expand(4.0 * s),
+            ui.scope_id().with(("bar", b)),
+            Sense::click(),
+        );
+        // No tooltips while painting: they would follow the brush around.
+        if !paint_mode {
+            resp = resp.on_hover_text(format!("Light bar {}", LightBar::ALL[b].short_name()));
+        }
         if app.target == Some(Target::Bar(b)) {
             painter.rect_stroke(
                 rect.expand(3.0 * s),
@@ -192,9 +222,6 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
         }
         if resp.clicked() {
             clicked = Some(Target::Bar(b));
-        }
-        if paint_mode && resp.hovered() && primary_down {
-            painted = Some(Target::Bar(b));
         }
     }
 
@@ -245,9 +272,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
             painter.circle_filled(rect.right_top() + vec2(-5.0, 5.0) * s, 2.5 * s, theme::OK);
         }
 
-        let resp = ui
-            .interact(*rect, ui.scope_id().with(("key", k)), Sense::click())
-            .on_hover_text(format!("Key {} · {}\n{}", k + 1, KEY_LEGENDS[k], a.label()));
+        let mut resp = ui.interact(*rect, ui.scope_id().with(("key", k)), Sense::click());
+        if !paint_mode {
+            resp = resp.on_hover_text(format!("Key {} · {}\n{}", k + 1, KEY_LEGENDS[k], a.label()));
+        }
         let selected = app.target == Some(Target::Key(k));
         if recording_key == Some(k) {
             painter.rect_stroke(
@@ -274,25 +302,15 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
         if resp.clicked() {
             clicked = Some(Target::Key(k));
         }
-        if resp.double_clicked() {
+        if resp.double_clicked() && !paint_mode {
             app.tab = Tab::Keys;
-        }
-        if paint_mode && resp.hovered() && primary_down {
-            painted = Some(Target::Key(k));
         }
     }
 
-    if let Some(t) = painted.or(clicked.filter(|_| paint_mode)) {
-        let paint = app.paint;
-        let lighting = &mut app.profile_mut().lighting;
-        let slot = match t {
-            Target::Key(k) => &mut lighting.key_colors[k],
-            Target::Bar(b) => &mut lighting.bar_colors[b],
-        };
-        if *slot != paint {
-            *slot = paint;
-            app.lighting_edited();
-        }
+    if paint_mode {
+        paint_strokes(ui, app, &g);
+    } else {
+        app.paint_last = None;
     }
     if let Some(t) = clicked {
         app.target = Some(t);
@@ -302,7 +320,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
     }
 
     let hint = if paint_mode {
-        "Click or drag over keys and light bars to paint them"
+        "Click or drag over keys and light bars to paint them · ⌘Z / Ctrl+Z undoes"
     } else {
         "Click a key to edit it · double-click opens its assignment"
     };
@@ -315,10 +333,95 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
     );
 }
 
+/// Painting (Lighting tab, Custom effect): a press inside the keypad starts a stroke, and every
+/// key and light bar the pointer passes over while the button is held takes the paint colour.
+/// One stroke is one undo step. Over the keypad the pointer becomes a brush in that colour.
+fn paint_strokes(ui: &egui::Ui, app: &mut FalconApp, g: &Geometry) {
+    let area = g.case.expand(6.0 * g.scale);
+    let (pressed, down, pos, hover) = ui.input(|i| {
+        (
+            i.pointer.primary_pressed(),
+            i.pointer.primary_down(),
+            i.pointer.interact_pos(),
+            i.pointer.hover_pos(),
+        )
+    });
+    if pressed && pos.is_some_and(|p| area.contains(p)) {
+        app.begin_paint_stroke();
+        app.paint_last = pos;
+    }
+    if !down {
+        app.paint_last = None;
+    }
+    if let (Some(last), Some(p)) = (app.paint_last, pos) {
+        for t in g.targets_along(last, p) {
+            app.paint_target(t);
+        }
+        app.paint_last = Some(p);
+    }
+    if let Some(h) = hover.filter(|h| area.contains(*h)) {
+        ui.ctx().set_cursor_icon(CursorIcon::None);
+        draw_brush(ui.ctx(), h, app.paint, ui.visuals().dark_mode);
+    }
+}
+
+/// A small pencil whose tip (at `tip`, the hot spot) shows the paint colour.
+fn draw_brush(ctx: &egui::Context, tip: Pos2, color: Rgb, dark: bool) {
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::unique("paint-brush"),
+    ));
+    let (outline, body) = if dark {
+        (Color32::from_gray(235), Color32::from_gray(70))
+    } else {
+        (Color32::from_gray(30), Color32::from_gray(225))
+    };
+    let dir = vec2(1.0, -1.0).normalized();
+    let half = vec2(-dir.y, dir.x) * 4.0;
+    let nib = tip + dir * 9.0;
+    let end = tip + dir * 26.0;
+    let stroke = Stroke::new(1.2, outline);
+    painter.add(Shape::convex_polygon(
+        vec![nib + half, end + half, end - half, nib - half],
+        body,
+        stroke,
+    ));
+    painter.add(Shape::convex_polygon(
+        vec![tip, nib - half, nib + half],
+        theme::color(color),
+        stroke,
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use falcon_core::{Function, Macro};
+
+    #[test]
+    fn strokes_reach_every_key_they_cross() {
+        let avail = Rect::from_min_size(Pos2::new(0.0, 0.0), vec2(600.0, 500.0));
+        let g = geometry(avail);
+        assert_eq!(g.target_at(g.keys[6].center()), Some(Target::Key(6)));
+        assert_eq!(g.target_at(g.bars[1].center()), Some(Target::Bar(1)));
+        assert_eq!(g.target_at(g.case.min), None);
+        // One frame's jump from the first to the last key of the top row hits all four.
+        let row = g.targets_along(g.keys[0].center(), g.keys[3].center());
+        assert_eq!(
+            row,
+            vec![
+                Target::Key(0),
+                Target::Key(1),
+                Target::Key(2),
+                Target::Key(3)
+            ]
+        );
+        // A click (no movement) paints just the key under the pointer.
+        assert_eq!(
+            g.targets_along(g.keys[9].center(), g.keys[9].center()),
+            vec![Target::Key(9)]
+        );
+    }
 
     #[test]
     fn geometry_fits_and_does_not_overlap() {

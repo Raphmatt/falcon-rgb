@@ -183,7 +183,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
 
 fn custom_editor(ui: &mut egui::Ui, app: &mut FalconApp, l: &mut falcon_core::Lighting) {
     heading(ui, "Per-key colours");
-    hint(ui, "Click keys or light bars on the keypad to paint them.");
+    hint(
+        ui,
+        "Click or drag over keys and light bars on the keypad to paint them. ⌘Z / Ctrl+Z undoes, ⌘⇧Z / Ctrl+Y redoes.",
+    );
     ui.horizontal(|ui| {
         ui.label("Paint");
         color_row(ui, "paint", &mut app.paint);

@@ -80,6 +80,29 @@ pub struct Recording {
     pub last: Option<f64>,
 }
 
+/// Waiting for the user to press the key (or combo) that key `key` of layer `profile` should
+/// send ("Press a key…" in the key editor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyCapture {
+    pub profile: usize,
+    pub key: usize,
+    /// Key combo: the held modifiers are part of it. Otherwise a single key.
+    pub combo: bool,
+}
+
+/// Undo history of the five layers (keys, lighting, names, linked apps).
+pub type History = egui::util::undoer::Undoer<[Profile; PROFILE_COUNT]>;
+
+/// An edit becomes its own undo step after this much quiet time.
+const UNDO_STABLE_SECONDS: f32 = 0.5;
+
+pub fn new_history() -> History {
+    History::with_settings(egui::util::undoer::Settings {
+        stable_time: UNDO_STABLE_SECONDS,
+        ..Default::default()
+    })
+}
+
 pub struct FalconApp {
     pub config: Config,
     file_snapshot: Config,
@@ -117,6 +140,12 @@ pub struct FalconApp {
     /// Backup file picked for restore, and the parsed backup waiting for confirmation.
     pub restore_inbox: crate::files::Inbox,
     pub pending_restore: Option<(String, falcon_core::Backup)>,
+    /// Undo/redo of edits (⌘Z / ⌘⇧Z, Ctrl+Z / Ctrl+Y). Reset when the keypad changes layers
+    /// under us (read-back at connect, restore, on-keypad lighting keys).
+    pub history: History,
+    /// Pointer position of the paint stroke in progress (Lighting tab, Custom effect).
+    pub paint_last: Option<egui::Pos2>,
+    pub key_capture: Option<KeyCapture>,
     watcher: autoswitch::Watcher,
     started: Instant,
 }
@@ -170,6 +199,9 @@ impl FalconApp {
             import_inbox: Default::default(),
             restore_inbox: Default::default(),
             pending_restore: None,
+            history: new_history(),
+            paint_last: None,
+            key_capture: None,
             watcher,
             started: Instant::now(),
         };
@@ -265,6 +297,11 @@ impl eframe::App for FalconApp {
         self.process_front_apps();
         views::layer::finish_import(self);
         views::layer::finish_restore_pick(self);
+        self.history
+            .feed_state(ctx.input(|i| i.time), &self.config.profiles);
+        if self.history.is_in_flux() {
+            ctx.request_repaint_after(Duration::from_secs_f32(UNDO_STABLE_SECONDS));
+        }
         if let Some(wait) = self.auto_apply_tick() {
             ctx.request_repaint_after(wait);
         }
@@ -274,6 +311,7 @@ impl eframe::App for FalconApp {
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        self.capture_key(raw);
         self.capture_recording(raw);
     }
 
@@ -288,6 +326,7 @@ impl eframe::App for FalconApp {
         {
             self.save(false);
         }
+        self.undo_shortcuts(ui);
         egui::Panel::top("toolbar").show(ui, |ui| views::top::show(ui, self));
         if self.conn == Connection::PermissionDenied {
             egui::Panel::top("permission")

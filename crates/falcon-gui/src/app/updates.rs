@@ -160,6 +160,7 @@ impl FalconApp {
         let lighting_change = |app: &mut Self, f: &dyn Fn(&mut falcon_core::Lighting)| {
             f(&mut app.config.profiles[p].lighting);
             f(&mut app.device_snapshot[p].lighting);
+            app.reset_history();
         };
         match event {
             DeviceEvent::EffectChanged { effect } => {

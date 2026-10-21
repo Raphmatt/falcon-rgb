@@ -134,6 +134,15 @@ GUI (`just gui --simulate` or `target/debug/falcon-gui [--simulate] [--config FI
   `HostCode` events trigger a refresh. `HostKey` runs the key's `LaunchProgram` (macOS `open`/`open -a`).
   `CommandAck`/`MouseReport` only show in the packet log. Firmware shows "n/a" (the 264-byte `0x80` is not implemented).
 - Auto layer switch (Layer tab): macOS polls `lsappinfo` every 2 s; other OSes: TODO (no frontmost-app source).
+- Painting (Lighting tab, Custom effect): `keypad::paint_strokes` — a press inside the keypad starts a stroke, every
+  key/bar along the pointer path (`Geometry::targets_along`, interpolated, so fast drags skip nothing) gets
+  `app.paint`; the system cursor is hidden and a brush in the paint colour is drawn instead; no tooltips meanwhile.
+- Undo/redo: `app.history` = egui `Undoer` over `config.profiles` (0.5 s settle; a paint stroke adds its own point).
+  ⌘Z/Ctrl+Z, ⌘⇧Z/⌘Y/Ctrl+Y, toolbar buttons; skipped while a text field has focus or keys are being captured.
+  `reset_history()` whenever the keypad changes layers (read-back at connect, restore, on-keypad lighting keys).
+- "Press a key…" / "Press a combo…" (key editor): `app.key_capture`; `capture_key` in `raw_input_hook` swallows the
+  next key press and assigns `Key(usage)` or `Combo(modifiers + usage)` (ctrl E0, shift E1, alt E2, ⌘ E3); Esc
+  cancels. OS/browser-reserved shortcuts (⌘Q, ⌘Tab, ⌘W in Chrome) never arrive.
 - Macro recording captures key events in the app window (`raw_input_hook`, physical keys → HID); numpad records as
   digit row, media/Fn keys are skipped, OS shortcuts (⌘Q, ⌘Tab) never reach the app.
 - Lighting preview is approximate (`preview.rs`); the packet log panel shows every SET/GET/IN packet as hex.

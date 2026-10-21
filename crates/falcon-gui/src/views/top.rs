@@ -51,6 +51,21 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
             {
                 app.save(false);
             }
+            ui.separator();
+            if ui
+                .add_enabled(app.can_redo(), Button::new("Redo"))
+                .on_hover_text("⌘⇧Z / Ctrl+Y")
+                .clicked()
+            {
+                app.redo();
+            }
+            if ui
+                .add_enabled(app.can_undo(), Button::new("Undo"))
+                .on_hover_text("⌘Z / Ctrl+Z")
+                .clicked()
+            {
+                app.undo();
+            }
             if all_dirty && !dirty {
                 ui.label(RichText::new("other layers changed").small().weak());
             }

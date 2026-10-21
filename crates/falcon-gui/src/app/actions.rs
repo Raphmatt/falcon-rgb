@@ -82,6 +82,7 @@ impl FalconApp {
         }
         let unknown = layer.apply_to_profile(&mut self.config.profiles[p]);
         self.device_snapshot[p] = self.config.profiles[p].clone();
+        self.reset_history();
         if !unknown.is_empty() {
             let keys: Vec<String> = unknown.iter().map(ToString::to_string).collect();
             self.info(format!(
@@ -176,7 +177,11 @@ impl FalconApp {
             block: *block,
             macros: Vec::new(),
         };
+        let before = self.config.profiles[p].clone();
         let unknown = layer.apply_to_profile(&mut self.config.profiles[p]);
+        if self.config.profiles[p] != before {
+            self.reset_history();
+        }
         self.device_snapshot[p] = self.config.profiles[p].clone();
         for &key in &unknown {
             // Not the configured value: the layer shows as differing from the keypad.
@@ -255,6 +260,166 @@ impl FalconApp {
             last: None,
         });
         self.info("Recording: press keys in this window, then click Stop");
+    }
+
+    /// Undo/redo shortcuts, unless a text field has focus (it has its own undo) or keystrokes
+    /// are being recorded. ⌘Z / Ctrl+Z undo; ⌘⇧Z, ⌘Y, Ctrl+Y and Ctrl+Shift+Z redo.
+    pub(super) fn undo_shortcuts(&mut self, ui: &egui::Ui) {
+        use egui::{Key, KeyboardShortcut as S, Modifiers as M};
+        if self.recording.is_some()
+            || self.key_capture.is_some()
+            || ui.ctx().egui_wants_keyboard_input()
+        {
+            return;
+        }
+        let (undo, redo) = ui.input_mut(|i| {
+            // Shifted forms first: consume_shortcut ignores extra Shift on the plain ones.
+            let redo = [
+                S::new(M::COMMAND | M::SHIFT, Key::Z),
+                S::new(M::CTRL | M::SHIFT, Key::Z),
+                S::new(M::COMMAND, Key::Y),
+                S::new(M::CTRL, Key::Y),
+            ]
+            .iter()
+            .any(|s| i.consume_shortcut(s));
+            let undo = !redo
+                && [S::new(M::COMMAND, Key::Z), S::new(M::CTRL, Key::Z)]
+                    .iter()
+                    .any(|s| i.consume_shortcut(s));
+            (undo, redo)
+        });
+        if undo {
+            self.undo();
+        } else if redo {
+            self.redo();
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        self.history.has_undo(&self.config.profiles)
+    }
+
+    pub fn can_redo(&self) -> bool {
+        self.history.has_redo(&self.config.profiles)
+    }
+
+    pub fn undo(&mut self) {
+        match self.history.undo(&self.config.profiles).cloned() {
+            Some(state) => self.apply_history(state, "Undone"),
+            None => self.info("Nothing to undo"),
+        }
+    }
+
+    pub fn redo(&mut self) {
+        match self.history.redo(&self.config.profiles).cloned() {
+            Some(state) => self.apply_history(state, "Redone"),
+            None => self.info("Nothing to redo"),
+        }
+    }
+
+    fn apply_history(&mut self, state: [Profile; PROFILE_COUNT], what: &str) {
+        self.stop_recording();
+        self.key_capture = None;
+        let lighting =
+            (0..PROFILE_COUNT).any(|p| self.config.profiles[p].lighting != state[p].lighting);
+        self.config.profiles = state;
+        if lighting {
+            self.lighting_edited();
+        }
+        self.info(format!("{what} (not saved yet)"));
+    }
+
+    /// The keypad changed the layers (read-back, restore, its own lighting keys): start a new
+    /// history, so undo never reverts the app to something the keypad no longer holds.
+    pub(super) fn reset_history(&mut self) {
+        self.history = super::new_history();
+    }
+
+    /// A paint stroke starts: the state before it becomes one undo step.
+    pub fn begin_paint_stroke(&mut self) {
+        self.history.add_undo(&self.config.profiles);
+    }
+
+    /// Paints `t` with the paint colour, if it does not have it yet.
+    pub fn paint_target(&mut self, t: super::Target) {
+        let paint = self.paint;
+        let lighting = &mut self.profile_mut().lighting;
+        let slot = match t {
+            super::Target::Key(k) => &mut lighting.key_colors[k],
+            super::Target::Bar(b) => &mut lighting.bar_colors[b],
+        };
+        if *slot != paint {
+            *slot = paint;
+            self.lighting_edited();
+        }
+    }
+
+    /// "Press a key…": the next key press in the window becomes the key's assignment (with the
+    /// held modifiers for a combo). Esc cancels. All key and text input is swallowed meanwhile.
+    pub(super) fn capture_key(&mut self, raw: &mut egui::RawInput) {
+        let Some(cap) = self.key_capture else {
+            return;
+        };
+        let mut pressed = None;
+        raw.events.retain(|e| match e {
+            egui::Event::Key {
+                key,
+                physical_key,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            } => {
+                if pressed.is_none() {
+                    pressed = Some((physical_key.unwrap_or(*key), *modifiers));
+                }
+                false
+            }
+            egui::Event::Key { .. }
+            | egui::Event::Text(_)
+            | egui::Event::Copy
+            | egui::Event::Cut
+            | egui::Event::Paste(_) => false,
+            _ => true,
+        });
+        let Some((key, mods)) = pressed else {
+            return;
+        };
+        self.key_capture = None;
+        if key == egui::Key::Escape && !mods.any() {
+            self.info("Key capture cancelled");
+            return;
+        }
+        let Some(code) = keymap::hid_usage(key) else {
+            self.error(format!(
+                "{} cannot be assigned here; pick it from the list",
+                key.name()
+            ));
+            return;
+        };
+        let assignment = if cap.combo {
+            let mut codes = Vec::new();
+            for (on, m) in [
+                (mods.ctrl, 0xE0),
+                (mods.shift, 0xE1),
+                (mods.alt, 0xE2),
+                (mods.mac_cmd, 0xE3),
+            ] {
+                if on {
+                    codes.push(m);
+                }
+            }
+            codes.push(code);
+            KeyAssignment::Combo(codes)
+        } else {
+            KeyAssignment::Key(code)
+        };
+        let label = assignment.label();
+        self.config.profiles[cap.profile].keys[cap.key] = assignment;
+        self.info(format!(
+            "Layer {} key {} → {label} (not saved yet)",
+            cap.profile + 1,
+            cap.key + 1
+        ));
     }
 
     pub fn stop_recording(&mut self) {

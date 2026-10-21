@@ -4,7 +4,7 @@ use eframe::egui::{self, RichText};
 use falcon_core::{Function, KeyAssignment, Macro, Profile, layout};
 
 use super::{heading, hint, macro_edit, picker};
-use crate::app::{FalconApp, Target};
+use crate::app::{FalconApp, KeyCapture, Target};
 use crate::theme;
 use crate::worker::{Mode, SimAction};
 
@@ -131,6 +131,13 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
     hint(ui, &format!("Factory function: {factory}"));
     ui.add_space(6.0);
 
+    // A pending "Press a key…" belongs to the key and layer it was started on.
+    if app
+        .key_capture
+        .is_some_and(|c| c.key != k || c.profile != app.active())
+    {
+        app.key_capture = None;
+    }
     let original = app.profile().keys[k].clone();
     let mut a = original.clone();
     let cat = category_of(&a);
@@ -147,6 +154,7 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
         Category::Default => hint(ui, &format!("The key sends its factory code ({factory}).")),
         Category::Disabled => hint(ui, "The key does nothing."),
         Category::Key => {
+            capture_button(ui, app, k, false);
             let mut code = match a {
                 KeyAssignment::Key(c) => Some(c),
                 _ => None,
@@ -157,7 +165,10 @@ pub fn show(ui: &mut egui::Ui, app: &mut FalconApp) {
                 a = KeyAssignment::Key(c);
             }
         }
-        Category::Combo => combo_editor(ui, app, &mut a),
+        Category::Combo => {
+            capture_button(ui, app, k, true);
+            combo_editor(ui, app, &mut a);
+        }
         Category::Macro => {
             // The macro editor edits the profile in place (recording needs that).
             if a != original {
@@ -222,6 +233,46 @@ fn layer_editor(ui: &mut egui::Ui, a: &mut KeyAssignment) {
     ui.add_space(4.0);
     hint(ui, "Or a profile function (Windows function codes):");
     function_list(ui, a, &LAYER_FUNCS);
+}
+
+/// "Press a key…": the next key pressed in the window becomes this key's assignment (handled in
+/// `FalconApp::capture_key`, before egui sees the keystroke).
+fn capture_button(ui: &mut egui::Ui, app: &mut FalconApp, k: usize, combo: bool) {
+    let cap = KeyCapture {
+        profile: app.active(),
+        key: k,
+        combo,
+    };
+    ui.horizontal(|ui| {
+        if app.key_capture == Some(cap) {
+            ui.label(
+                RichText::new(if combo {
+                    "Press the combo now, e.g. ⌘C or Ctrl+Shift+T… (Esc cancels)"
+                } else {
+                    "Press the key now… (Esc cancels)"
+                })
+                .strong()
+                .color(theme::WARN),
+            );
+            if ui.small_button("Cancel").clicked() {
+                app.key_capture = None;
+            }
+            ui.ctx().request_repaint();
+        } else {
+            let text = if combo { "⌨ Press a combo…" } else { "⌨ Press a key…" };
+            if ui
+                .button(text)
+                .on_hover_text(
+                    "Then press it on your keyboard. Shortcuts the system or browser keeps for itself (⌘Q, ⌘Tab, ⌘W in a browser) cannot be captured; pick those from the list.",
+                )
+                .clicked()
+            {
+                app.stop_recording();
+                app.key_capture = Some(cap);
+            }
+        }
+    });
+    ui.add_space(4.0);
 }
 
 fn combo_editor(ui: &mut egui::Ui, app: &mut FalconApp, a: &mut KeyAssignment) {

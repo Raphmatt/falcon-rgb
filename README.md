@@ -14,11 +14,12 @@ also runs **in the browser** (WebAssembly + WebHID), with nothing to install:
 
 - Per-layer key assignments for all 20 keys and 5 layers: single keys, key combos, macros
   (recorded or edited, with delays and repeat modes), mouse buttons, scrolling, media keys and
-  layer switching.
+  layer switching. *Press a key…* assigns a key (or a combo like ⌘C) by pressing it.
 - "Launch program" keys: the keypad reports the key press and the app opens a program on the
   computer.
 - Lighting: static, wave and custom per-key colours, the four light bars, brightness and wave
-  direction.
+  direction. Per-key colours are painted by clicking or dragging over the keys.
+- Undo and redo for all edits (⌘Z / ⌘⇧Z, Ctrl+Z / Ctrl+Y).
 - Automatic layer switching based on the frontmost app (macOS).
 - The desktop app follows layer changes made on the keypad itself.
 - A command-line tool (`falcon`) for scripting, plus hex packet logs, dry runs and a simulated
