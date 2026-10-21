@@ -6,7 +6,9 @@
   <title>Falcon RGB</title>
   <meta name="description" content="Configure the Falcon-20 RGB macro keypad in the browser (WebHID).">
   <!-- Built by trunk: compiles this crate to WebAssembly and wires up the JS glue. -->
-  <link data-trunk rel="rust" data-bin="falcon-gui" />
+  <!-- wasm-opt must accept the features rustc enables by default for wasm32. -->
+  <link data-trunk rel="rust" data-bin="falcon-gui"
+        data-wasm-opt-params="--enable-bulk-memory --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-reference-types" />
   <style>
     :root { color-scheme: light dark; }
     html, body { margin: 0; height: 100%; overflow: hidden; background: #f4f4f2; }
