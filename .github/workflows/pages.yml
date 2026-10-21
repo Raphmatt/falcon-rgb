@@ -5,6 +5,15 @@ name: Web app
 on:
   push:
     branches: [main]
+    # Only what ends up in the web app (falcon-cli and docs are not part of it). For anything
+    # else, start the workflow by hand (Actions → Web app → Run workflow).
+    paths:
+      - "crates/falcon-core/**"
+      - "crates/falcon-gui/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".cargo/config.toml"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:

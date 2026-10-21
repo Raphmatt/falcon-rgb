@@ -3,7 +3,8 @@
 An unofficial, open-source configuration tool for the **MAX Falcon-20 RGB** macro keypad
 (USB `195D:6008`), written in Rust. The keypad only ships with Windows software; this project
 runs on macOS first and should work on Windows and Linux through hidapi and egui. The same app
-also runs **in the browser** (WebAssembly + WebHID), with nothing to install.
+also runs **in the browser** (WebAssembly + WebHID), with nothing to install:
+**https://raphmatt.github.io/falcon-rgb/** (Chrome, Edge, Brave or Opera on desktop).
 
 > **Not affiliated with, endorsed by or supported by the keypad's manufacturer.** "MAX",
 > "Falcon" and all other product names are trademarks of their respective owners and are used
@@ -33,8 +34,8 @@ list. See [docs/protocol.md](docs/protocol.md) for the protocol description.
 
 ## In the browser
 
-The desktop app compiles to WebAssembly and talks to the keypad through
-[WebHID](https://developer.mozilla.org/en-US/docs/Web/API/WebHID_API):
+Open **https://raphmatt.github.io/falcon-rgb/**. The desktop app compiles to WebAssembly and
+talks to the keypad through [WebHID](https://developer.mozilla.org/en-US/docs/Web/API/WebHID_API):
 
 - Works in Chrome, Edge, Brave and Opera on desktop. Safari and Firefox have no WebHID, but the
   simulated keypad (`?simulate`) still works there.
@@ -47,7 +48,8 @@ The desktop app compiles to WebAssembly and talks to the keypad through
 
 Run it locally with `just web` (http://127.0.0.1:8080). `just web-build` writes static files
 to `dist/web/`. The included GitHub Actions workflow (`.github/workflows/pages.yml`) publishes
-them on GitHub Pages; enable *Settings → Pages → Source: GitHub Actions* once.
+them on GitHub Pages; enable *Settings → Pages → Source: GitHub Actions* once. It runs only
+when the core library, the app or the build setup change (not for README or CLI-only commits).
 
 ## Building
 
